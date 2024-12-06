@@ -3,8 +3,8 @@
 # We will build some tools/scripts that allow us to
 # change this easily when relocating software.
 # ==============================================================
-EPICS_SITE_TOP=/reg/g/pcds/epics/
-BASE_MODULE_VERSION=R7.0.3.1-2.0
+EPICS_SITE_TOP=/cds/group/pcds/epics
+BASE_MODULE_VERSION = R7.0.3.1-2.0
 
 # EPICS module releases are kept here
 EPICS_MODULES=$(EPICS_SITE_TOP)/$(BASE_MODULE_VERSION)/modules
