@@ -44,6 +44,9 @@
 {% endfor %}
 #
 ################### AUTO-GENERATED DO NOT EDIT ###################
+# Run common startup commands for linux soft IOC's
+< $(IOC_COMMON)/All/pre_linux.cmd
+
 {%- if plc.tmc %}
 
 {%- set allow_errors = ignore_linter_errors | int %}
