@@ -18,6 +18,8 @@ include $(TOP)/configure/CONFIG
 ARCHIVE +=
 REQ +=
 
+DB += motor.template
+DB += motor.proto
 DB += EthercatMC.template
 DB += EthercatMCdebug.template
 DB += EthercatMChome.template

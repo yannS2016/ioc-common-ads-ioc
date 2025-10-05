@@ -17,6 +17,7 @@ adsIoc_DBD += base.dbd
 adsIoc_DBD += iocAdmin.dbd
 adsIoc_DBD += asSupport.dbd
 adsIoc_DBD += ads.dbd
+adsIoc_DBD += stream.dbd
 adsIoc_DBD += asyn.dbd
 adsIoc_DBD += drvAsynIPPort.dbd
 adsIoc_DBD += dbArchive.dbd
@@ -47,6 +48,11 @@ ifneq (,$(findstring /,$(MOTOR)))
   adsIoc_LIBS += EthercatMcSupport
 endif
 
+ifneq ($(words $(CALC)), 0) # If CALC was defined in RELEASE
+adsIoc_DBD += calcSupport.dbd         #    include its dbd
+adsIoc_LIBS += calc                    #    and link its library
+endif
+
 # adsIoc_registerRecordDeviceDriver.cpp will be created from adsIoc.dbd
 adsIoc_SRCS += adsIoc_registerRecordDeviceDriver.cpp
 adsIoc_SRCS += infoFieldArchive.c
@@ -55,6 +61,7 @@ adsIoc_SRCS_DEFAULT += adsIocMain.cpp
 adsIoc_LIBS += devIocStats
 adsIoc_LIBS += asyn
 adsIoc_LIBS += autosave
+adsIoc_LIBS += stream
 adsIoc_LIBS += $(EPICS_BASE_IOC_LIBS)
 
 #===========================

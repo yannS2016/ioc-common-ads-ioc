@@ -1,0 +1,28 @@
+# Command record that triggers the move with StreamDevice
+
+record(bo, "$(PREFIX):$(M):MOVE_CMD")
+{
+    field(DESC, "Trigger axis move batch via StreamDevice")
+    field(DTYP, "stream")
+    field(FLNK, "$(PREFIX):$(M):RESET_CMD")
+    field(OUT,  "@motor.proto move_cmd($(ADSPORT), $(ADSPATH), $(PREFIX), $(M)) $(PORT)")
+}
+
+record(bo, "$(PREFIX):$(M):HOME_CMD")
+{
+    field(DESC, "Trigger axis move batch via StreamDevice")
+    field(DTYP, "stream")
+    field(FLNK, "$(PREFIX):$(M):RESET_CMD")
+    field(OUT,  "@motor.proto home_cmd($(ADSPORT), $(ADSPATH), $(PREFIX), $(M)) $(PORT)")
+}
+
+record(seq, "$(PREFIX):$(M):RESET_CMD")
+{
+   field(DESC, "RESET MOVE CMD")
+   field(SCAN, "Passive")
+   field(DO1, "0")
+   field(DO2, "0")
+   field(LNK1, "$(PREFIX):$(M):MOVE_CMD")
+   field(LNK2, "$(PREFIX):$(M):HOME_CMD")
+   field(PINI, "YES")
+}
