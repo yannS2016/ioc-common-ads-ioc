@@ -1,28 +1,29 @@
 # Command record that triggers the move with StreamDevice
 
-record(bo, "$(PREFIX):$(M):MOVE_CMD")
+record(bo, "$(PREFIX)$(M):MoveCmd")
 {
-    field(DESC, "Trigger axis move batch via StreamDevice")
+    field(DESC, "Trigger pre-configured absolute move")
     field(DTYP, "stream")
-    field(FLNK, "$(PREFIX):$(M):RESET_CMD")
+    field(FLNK, "$(PREFIX)$(M):ResetCmd")
     field(OUT,  "@motor.proto move_cmd($(ADSPORT), $(ADSPATH), $(PREFIX), $(M)) $(PORT)")
 }
 
-record(bo, "$(PREFIX):$(M):HOME_CMD")
+record(bo, "$(PREFIX)$(M):HomeCmd")
 {
-    field(DESC, "Trigger axis move batch via StreamDevice")
+    field(DESC, "Trigger pre-configured home move")
     field(DTYP, "stream")
-    field(FLNK, "$(PREFIX):$(M):RESET_CMD")
+    field(FLNK, "$(PREFIX)$(M):ResetCmd")
     field(OUT,  "@motor.proto home_cmd($(ADSPORT), $(ADSPATH), $(PREFIX), $(M)) $(PORT)")
 }
 
-record(seq, "$(PREFIX):$(M):RESET_CMD")
+record(seq, "$(PREFIX)$(M):ResetCmd")
 {
-   field(DESC, "RESET MOVE CMD")
+   field(DESC, "auto reset previous cmd")
    field(SCAN, "Passive")
    field(DO1, "0")
    field(DO2, "0")
-   field(LNK1, "$(PREFIX):$(M):MOVE_CMD")
-   field(LNK2, "$(PREFIX):$(M):HOME_CMD")
+   field(LNK1, "$(PREFIX)$(M):MoveCmd")
+   field(LNK2, "$(PREFIX)$(M):HomeCmd")
    field(PINI, "YES")
 }
+

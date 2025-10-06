@@ -53,6 +53,17 @@ adsIoc_DBD += calcSupport.dbd         #    include its dbd
 adsIoc_LIBS += calc                    #    and link its library
 endif
 
+ifdef PCRE
+LIB_LIBS += pcre
+else
+ifneq ($(words $(PCRE_LIB) $(PCRE_INCLUDE)),0)
+PROD_SYS_LIBS_DEFAULT += pcre
+PROD_SYS_LIBS_WIN32 += $(PCRE_LIB)\\pcre
+SHRLIB_DEPLIB_DIRS += $(PCRE_LIB)
+USR_LDFLAGS+=-L$(PCRE_LIB)
+endif
+endif
+
 # adsIoc_registerRecordDeviceDriver.cpp will be created from adsIoc.dbd
 adsIoc_SRCS += adsIoc_registerRecordDeviceDriver.cpp
 adsIoc_SRCS += infoFieldArchive.c

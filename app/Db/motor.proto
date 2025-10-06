@@ -19,7 +19,7 @@ home_cmd {
 out
     "ADSPORT=\$1/\$2.stMotionCommand.bHomeCmd=0;"
     "ADSPORT=\$1/\$2.stMotionCommand.nCommand=%(\$3\$4:nCommand)d;"
-	"ADSPORT=\$1/\$2.stMotionCommand.nCmdData=%(\$3\$4:nCmdData)d;"
+    "ADSPORT=\$1/\$2.stMotionCommand.nCmdData=%(\$3\$4:nCmdData)d;"
     "ADSPORT=\$1/\$2.stMotionCommand.fHomePosition=%(\$3\$4:fHomePosition).5f;"
     "ADSPORT=\$1/\$2.stMotionCommand.bHomeCmd=1;"
 }
