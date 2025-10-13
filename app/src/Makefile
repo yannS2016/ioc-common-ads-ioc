@@ -28,6 +28,11 @@ ifneq (,$(findstring /,$(CAPUTLOG)))
   adsIoc_LIBS += caPutLog
 endif
 
+ifneq (,$(findstring /,$(CALC)))
+  adsIoc_DBD += calcSupport.dbd
+  adsIoc_LIBS += calc
+endif
+
 ifneq (,$(findstring /,$(ADS)))
   adsIoc_LIBS += ads
   adsIoc_DBD  += ads.dbd
