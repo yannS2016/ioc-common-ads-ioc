@@ -147,17 +147,16 @@ cd "$(ADS_IOC_TOP)/db"
 
 ########## Motor Configuration Block ##########
 {% set nc = get_nc(project) %}
-# Only one of these will be used, ensured by pre-processing in Python!
-# Macros for visualization/screens (all axes)
 {% if motors %}
-## Load EPICS base, asyn, StreamDevice, and ADS support
-epicsEnvSet("STREAM_PROTOCOL_PATH", "$(ADS_IOC_TOP)/db")
-
 epicsEnvSet("MOTOR_PORT",     "PLC_ADS")
 epicsEnvSet("PREFIX",         "{{prefix}}{{pv_delimiter}}")
 epicsEnvSet("NUMAXES",        "{{nc.axis_by_id|max}}")
 epicsEnvSet("MOVE_POLL_RATE", "200")
 epicsEnvSet("IDLE_POLL_RATE", "1000")
+
+{% if legacy_motors %}
+EthercatMCCreateController("$(MOTOR_PORT)", "$(ASYN_PORT)", "$(NUMAXES)", "$(MOVE_POLL_RATE)", "$(IDLE_POLL_RATE)")
+{% endif %}
 
 {% for motor in motors %}
 epicsEnvSet("AXIS_NO",         "{{motor.nc_axis.axis_number}}")
@@ -170,14 +169,16 @@ epicsEnvSet("PREC",            "{{motor|pragma('precision', 3) }}")
 epicsEnvSet("AXISCONFIG",      "{{motor|pragma('axisconfig', '')}}")
 epicsEnvSet("ECAXISFIELDINIT", "{{motor|pragma('additional_fields', '') }}")
 epicsEnvSet("AMPLIFIER_FLAGS", "{{motor|pragma('amplifier_flags', '') }}")
-
 {% if motor.is_legacy_motor %}
+
 EthercatMCCreateAxis("$(MOTOR_PORT)", "$(AXIS_NO)", "$(AMPLIFIER_FLAGS)", "$(AXISCONFIG)")
 dbLoadRecords("EthercatMC.template", "PREFIX=$(MOTOR_PREFIX), MOTOR_NAME=$(MOTOR_NAME), R=$(MOTOR_NAME)-, MOTOR_PORT=$(MOTOR_PORT), ASYN_PORT=$(ASYN_PORT), AXIS_NO=$(AXIS_NO), DESC=$(DESC), PREC=$(PREC), EGU=$(EGU) $(ECAXISFIELDINIT)")
 dbLoadRecords("EthercatMCreadback.template", "PREFIX=$(MOTOR_PREFIX), MOTOR_NAME=$(MOTOR_NAME), R=$(MOTOR_NAME)-, MOTOR_PORT=$(MOTOR_PORT), ASYN_PORT=$(ASYN_PORT), AXIS_NO=$(AXIS_NO), DESC=$(DESC), PREC=$(PREC) ")
 dbLoadRecords("EthercatMCdebug.template", "PREFIX=$(MOTOR_PREFIX), MOTOR_NAME=$(MOTOR_NAME), MOTOR_PORT=$(MOTOR_PORT), AXIS_NO=$(AXIS_NO), PREC=3")
 {% else %}
+
 dbLoadRecords("motor.template", "PORT=$(ASYN_PORT), ADSPORT=$(AMS_PORT), ADSPATH=$(MOTOR_ADS_PATH), PREFIX=$(MOTOR_PREFIX), M=$(MOTOR_NAME)")
+
 {% endif %}
 {% endfor %}
 {% endif %}
