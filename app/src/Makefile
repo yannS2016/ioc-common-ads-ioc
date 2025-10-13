@@ -28,11 +28,6 @@ ifneq (,$(findstring /,$(CAPUTLOG)))
   adsIoc_LIBS += caPutLog
 endif
 
-ifneq (,$(findstring /,$(CALC)))
-  adsIoc_DBD += calcSupport.dbd
-  adsIoc_LIBS += calc
-endif
-
 ifneq (,$(findstring /,$(ADS)))
   adsIoc_LIBS += ads
   adsIoc_DBD  += ads.dbd
@@ -46,11 +41,6 @@ ifneq (,$(findstring /,$(MOTOR)))
   adsIoc_LIBS += motor
   adsIoc_LIBS += softMotor
   adsIoc_LIBS += EthercatMcSupport
-endif
-
-ifneq ($(words $(CALC)), 0) # If CALC was defined in RELEASE
-adsIoc_DBD += calcSupport.dbd         #    include its dbd
-adsIoc_LIBS += calc                    #    and link its library
 endif
 
 ifdef PCRE

@@ -14,7 +14,6 @@ ETHERCATMC_MODULE_VERSION = R2.1.0-0.1.5
 ADS_MODULE_VERSION = R2.0.0-0.0.11
 CAPUTLOG_MODULE_VERSION = R4.0-1.0.0
 STREAMDEVICE_MODULE_VERSION  = R2.8.9-1.2.2
-CALC_MODULE_VERSION          = R3.7-1.0.1
 # ============================================================
 # External Support module path definitions
 #
@@ -41,7 +40,6 @@ ADS=$(EPICS_MODULES)/twincat-ads/$(ADS_MODULE_VERSION)
 #ADS=$(MY_MODULES)/twincat-ads
 CAPUTLOG=$(EPICS_MODULES)/caPutLog/$(CAPUTLOG_MODULE_VERSION)
 STREAMDEVICE=$(EPICS_MODULES)/streamdevice/$(STREAMDEVICE_MODULE_VERSION)
-CALC=$(EPICS_MODULES)/calc/$(CALC_MODULE_VERSION)
 #MCB_MODULES=/reg/neh/home4/mcbrowne/git/modules
 
 # ===============================================================
@@ -84,10 +82,6 @@ endif
 
 ifeq ($(wildcard $(STREAMDEVICE)/lib/$(T_A)),)
 $(error Invalid STREAMDEVICE: $(STREAMDEVICE)/lib/$(T_A))
-endif
-
-ifeq ($(wildcard $(CALC)/lib/$(T_A)),)
-$(error Invalid CALC: $(CALC)/lib/$(T_A))
 endif
 
 ifeq ($(wildcard $(CAPUTLOG)/lib/$(T_A)),)
