@@ -158,7 +158,7 @@ epicsEnvSet("IDLE_POLL_RATE", "1000")
 EthercatMCCreateController("$(MOTOR_PORT)", "$(ASYN_PORT)", "$(NUMAXES)", "$(MOVE_POLL_RATE)", "$(IDLE_POLL_RATE)")
 {% endif %}
 
-{% for motor in motors %}
+{% for motor in motors | sort(attribute='nc_axis.axis_number') %}
 epicsEnvSet("AXIS_NO",         "{{motor.nc_axis.axis_number}}")
 epicsEnvSet("MOTOR_PREFIX",    "{{motor|epics_prefix}}")
 epicsEnvSet("MOTOR_NAME",      "{{motor|epics_suffix}}")
