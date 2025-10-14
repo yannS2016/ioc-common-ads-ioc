@@ -143,11 +143,15 @@ asynSetTraceIOMask("$(ASYN_PORT)", -1, 2)
 #define ASYN_TRACEINFO_THREAD 0x0008
 asynSetTraceInfoMask("$(ASYN_PORT)", -1, 5)
 
+#define AMPLIFIER_ON_FLAG_CREATE_AXIS  1
+#define AMPLIFIER_ON_FLAG_WHEN_HOMING  2
+#define AMPLIFIER_ON_FLAG_USING_CNEN   4
+
 cd "$(ADS_IOC_TOP)/db"
 
 ########## Motor Configuration Block ##########
-{% set nc = get_nc(project) %}
 {% if motors %}
+{% set nc = get_nc(project) %}
 epicsEnvSet("MOTOR_PORT",     "PLC_ADS")
 epicsEnvSet("PREFIX",         "{{prefix}}{{pv_delimiter}}")
 epicsEnvSet("NUMAXES",        "{{nc.axis_by_id|max}}")
