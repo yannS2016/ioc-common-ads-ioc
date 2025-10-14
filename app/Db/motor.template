@@ -1,11 +1,11 @@
-# Command record that triggers the move with StreamDevice
+# Command records that trigger the move with StreamDevice
 
 record(bo, "$(PREFIX)$(M):MoveCmd")
 {
     field(DESC, "Trigger pre-configured absolute move")
     field(DTYP, "stream")
     field(FLNK, "$(PREFIX)$(M):ResetCmd")
-    field(OUT,  "@motor.proto move_cmd($(ADSPORT), $(ADSPATH), $(PREFIX), $(M)) $(PORT)")
+    field(OUT,  "@motor.proto move_cmd($(ADSPORT), $(ADSPATH), $(PREFIX), $(M), $(PREC=3)) $(PORT)")
 }
 
 record(bo, "$(PREFIX)$(M):HomeCmd")
@@ -13,7 +13,7 @@ record(bo, "$(PREFIX)$(M):HomeCmd")
     field(DESC, "Trigger pre-configured home move")
     field(DTYP, "stream")
     field(FLNK, "$(PREFIX)$(M):ResetCmd")
-    field(OUT,  "@motor.proto home_cmd($(ADSPORT), $(ADSPATH), $(PREFIX), $(M)) $(PORT)")
+    field(OUT,  "@motor.proto home_cmd($(ADSPORT), $(ADSPATH), $(PREFIX), $(M), $(PREC=3)) $(PORT)")
 }
 
 record(seq, "$(PREFIX)$(M):ResetCmd")

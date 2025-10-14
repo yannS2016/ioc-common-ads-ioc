@@ -158,10 +158,16 @@ epicsEnvSet("NUMAXES",        "{{nc.axis_by_id|max}}")
 epicsEnvSet("MOVE_POLL_RATE", "200")
 epicsEnvSet("IDLE_POLL_RATE", "1000")
 
+{% if stream_motors %}
+## Bulk stream operations
+epicsEnvSet("STREAM_PROTOCOL_PATH", "$(ADS_IOC_TOP)/db")
+{% endif %}
+
 {% if legacy_motors %}
 # Create the EthercatMC controller for the legacy (ST_MotionStage) motors.
 EthercatMCCreateController("$(MOTOR_PORT)", "$(ASYN_PORT)", "$(NUMAXES)", "$(MOVE_POLL_RATE)", "$(IDLE_POLL_RATE)")
 {% endif %}
+
 {% for motor in motors  %}
 epicsEnvSet("AXIS_NO",         "{{motor.nc_axis.axis_number}}")
 epicsEnvSet("MOTOR_PREFIX",    "{{motor|epics_prefix}}")
@@ -180,10 +186,11 @@ EthercatMCCreateAxis("$(MOTOR_PORT)", "$(AXIS_NO)", "$(AMPLIFIER_FLAGS)", "$(AXI
 dbLoadRecords("EthercatMC.template", "PREFIX=$(MOTOR_PREFIX), MOTOR_NAME=$(MOTOR_NAME), R=$(MOTOR_NAME)-, MOTOR_PORT=$(MOTOR_PORT), ASYN_PORT=$(ASYN_PORT), AXIS_NO=$(AXIS_NO), DESC=$(DESC), PREC=$(PREC), EGU=$(EGU) $(ECAXISFIELDINIT)")
 dbLoadRecords("EthercatMCreadback.template", "PREFIX=$(MOTOR_PREFIX), MOTOR_NAME=$(MOTOR_NAME), R=$(MOTOR_NAME)-, MOTOR_PORT=$(MOTOR_PORT), ASYN_PORT=$(ASYN_PORT), AXIS_NO=$(AXIS_NO), DESC=$(DESC), PREC=$(PREC) ")
 dbLoadRecords("EthercatMCdebug.template", "PREFIX=$(MOTOR_PREFIX), MOTOR_NAME=$(MOTOR_NAME), MOTOR_PORT=$(MOTOR_PORT), AXIS_NO=$(AXIS_NO), PREC=3")
+
 {% else %}
 # ---- StreamDevice Motor Axis Records (FB_MotionStage) ----
 # Loads the StreamDevice-based records for this FB_MotionStage axis.
-dbLoadRecords("motor.template", "PORT=$(ASYN_PORT), ADSPORT=$(AMS_PORT), ADSPATH=$(MOTOR_ADS_PATH), PREFIX=$(MOTOR_PREFIX), M=$(MOTOR_NAME)")
+dbLoadRecords("motor.template", "PORT=$(ASYN_PORT), ADSPORT=$(AMS_PORT), ADSPATH=$(MOTOR_ADS_PATH), PREFIX=$(MOTOR_PREFIX), M=$(MOTOR_NAME), PREC=$(PREC)")
 
 {% endif %}
 {% endfor %}
