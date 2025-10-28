@@ -121,20 +121,7 @@ system("${ADS_IOC_TOP}/scripts/add_route.sh {{ plc_host }} {{ ioc_host_ip_regex 
 #                         arrives in the EPICS client.
 adsAsynPortDriverConfigure("$(ASYN_PORT)", "$(IPADDR)", "$(AMSID)", "$(AMS_PORT)", "$(ADS_MAX_PARAMS)", 0, 0, "$(ADS_SAMPLE_MS)", "$(ADS_MAX_DELAY_MS)", "$(ADS_TIMEOUT_MS)", "$(ADS_TIME_SOURCE)")
 
-cd "$(ADS_IOC_TOP)/db"
-
-{% set motors = get_motors(plc) %}
-{% if motors %}
-{%- set nc = get_nc(project) %}
-
-epicsEnvSet("MOTOR_PORT",     "PLC_ADS")
-epicsEnvSet("PREFIX",         "{{prefix}}{{pv_delimiter}}")
-epicsEnvSet("NUMAXES",        "{{nc.axis_by_id|max}}")
-epicsEnvSet("MOVE_POLL_RATE", "200")
-epicsEnvSet("IDLE_POLL_RATE", "1000")
-
-EthercatMCCreateController("$(MOTOR_PORT)", "$(ASYN_PORT)", "$(NUMAXES)", "$(MOVE_POLL_RATE)", "$(IDLE_POLL_RATE)")
-
+## Asyn/ADS diagnostics configuration (always loaded)
 #define ASYN_TRACE_ERROR     0x0001
 #define ASYN_TRACEIO_DEVICE  0x0002
 #define ASYN_TRACEIO_FILTER  0x0004
@@ -160,22 +147,52 @@ asynSetTraceInfoMask("$(ASYN_PORT)", -1, 5)
 #define AMPLIFIER_ON_FLAG_WHEN_HOMING  2
 #define AMPLIFIER_ON_FLAG_USING_CNEN   4
 
+cd "$(ADS_IOC_TOP)/db"
+
+########## Motor Configuration Block ##########
+{% if motors %}
+{% set nc = get_nc(project) %}
+epicsEnvSet("MOTOR_PORT",     "PLC_ADS")
+epicsEnvSet("PREFIX",         "{{prefix}}{{pv_delimiter}}")
+epicsEnvSet("NUMAXES",        "{{nc.axis_by_id|max}}")
+epicsEnvSet("MOVE_POLL_RATE", "200")
+epicsEnvSet("IDLE_POLL_RATE", "1000")
+
+{% if stream_motors %}
+## Bulk stream operations
+epicsEnvSet("STREAM_PROTOCOL_PATH", "$(ADS_IOC_TOP)/db")
+{% endif %}
+
+{% if legacy_motors %}
+# Create the EthercatMC controller for the legacy (ST_MotionStage) motors.
+EthercatMCCreateController("$(MOTOR_PORT)", "$(ASYN_PORT)", "$(NUMAXES)", "$(MOVE_POLL_RATE)", "$(IDLE_POLL_RATE)")
+{% endif %}
+
 {% for motor in motors | sort(attribute='nc_axis.axis_number') %}
 epicsEnvSet("AXIS_NO",         "{{motor.nc_axis.axis_number}}")
 epicsEnvSet("MOTOR_PREFIX",    "{{motor|epics_prefix}}")
 epicsEnvSet("MOTOR_NAME",      "{{motor|epics_suffix}}")
+epicsEnvSet("MOTOR_ADS_PATH",  "{{motor.name}}")
 epicsEnvSet("DESC",            "{{motor.name}} / {{motor.nc_axis.name}}")
 epicsEnvSet("EGU",             "{{motor.nc_axis.units}}")
 epicsEnvSet("PREC",            "{{motor|pragma('precision', 3) }}")
 epicsEnvSet("AXISCONFIG",      "{{motor|pragma('axisconfig', '')}}")
 epicsEnvSet("ECAXISFIELDINIT", "{{motor|pragma('additional_fields', '') }}")
 epicsEnvSet("AMPLIFIER_FLAGS", "{{motor|pragma('amplifier_flags', '') }}")
+{% if motor.is_legacy_motor %}
 
+# Create an EthercatMC axis instance for each legacy (ST_MotionStage) motor.
 EthercatMCCreateAxis("$(MOTOR_PORT)", "$(AXIS_NO)", "$(AMPLIFIER_FLAGS)", "$(AXISCONFIG)")
 dbLoadRecords("EthercatMC.template", "PREFIX=$(MOTOR_PREFIX), MOTOR_NAME=$(MOTOR_NAME), R=$(MOTOR_NAME)-, MOTOR_PORT=$(MOTOR_PORT), ASYN_PORT=$(ASYN_PORT), AXIS_NO=$(AXIS_NO), DESC=$(DESC), PREC=$(PREC), EGU=$(EGU) $(ECAXISFIELDINIT)")
 dbLoadRecords("EthercatMCreadback.template", "PREFIX=$(MOTOR_PREFIX), MOTOR_NAME=$(MOTOR_NAME), R=$(MOTOR_NAME)-, MOTOR_PORT=$(MOTOR_PORT), ASYN_PORT=$(ASYN_PORT), AXIS_NO=$(AXIS_NO), DESC=$(DESC), PREC=$(PREC) ")
 dbLoadRecords("EthercatMCdebug.template", "PREFIX=$(MOTOR_PREFIX), MOTOR_NAME=$(MOTOR_NAME), MOTOR_PORT=$(MOTOR_PORT), AXIS_NO=$(AXIS_NO), PREC=3")
 
+{% else %}
+# ---- StreamDevice Motor Axis Records (FB_MotionStage) ----
+# Loads the StreamDevice-based records for this FB_MotionStage axis.
+dbLoadRecords("motor.template", "PORT=$(ASYN_PORT), ADSPORT=$(AMS_PORT), ADSPATH=$(MOTOR_ADS_PATH), PREFIX=$(MOTOR_PREFIX), M=$(MOTOR_NAME), PREC=$(PREC)")
+
+{% endif %}
 {% endfor %}
 {% endif %}
 
