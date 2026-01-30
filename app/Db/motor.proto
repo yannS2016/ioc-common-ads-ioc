@@ -6,8 +6,6 @@ ReadTimeout = 100;
 move_cmd {
 out
     "ADSPORT=\$1/\$2.stMotionCommand.bMoveCmd=0;"
-    "ADSPORT=\$1/\$2.stMotionCommand.nCommand=%(\$3\$4:nCommand)d;"
-    "ADSPORT=\$1/\$2.stMotionCommand.nCmdData=%(\$3\$4:nCmdData)d;"
     "ADSPORT=\$1/\$2.stMotionCommand.fPosition=%(\$3\$4:fPosition).\$5f;"
     "ADSPORT=\$1/\$2.stMotionCommand.fAcceleration=%(\$3\$4:fAcceleration).\$5f;"
     "ADSPORT=\$1/\$2.stMotionCommand.fDeceleration=%(\$3\$4:fDeceleration).\$5f;"
@@ -18,9 +16,7 @@ out
 home_cmd {
 out
     "ADSPORT=\$1/\$2.stMotionCommand.bHomeCmd=0;"
-    "ADSPORT=\$1/\$2.stMotionCommand.nCommand=%(\$3\$4:nCommand)d;"
-    "ADSPORT=\$1/\$2.stMotionCommand.nCmdData=%(\$3\$4:nCmdData)d;"
+    "ADSPORT=\$1/\$2.stMotionCommand.eHomeMode=%(\$3\$4:eHomeMode)d;"
     "ADSPORT=\$1/\$2.stMotionCommand.fHomePosition=%(\$3\$4:fHomePosition).\$5f;"
     "ADSPORT=\$1/\$2.stMotionCommand.bHomeCmd=1;"
 }
-
