@@ -27,3 +27,9 @@ record(seq, "$(PREFIX)$(M):ResetCmd")
    field(PINI, "YES")
 }
 
+record(stringin, "$(PREFIX)$(M):EGU")
+{
+    field(DESC, "Motor EGU")
+    field(VAL,  "$(EGU)")
+    field(PINI, "YES")
+}
