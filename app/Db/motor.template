@@ -27,9 +27,11 @@ record(seq, "$(PREFIX)$(M):ResetCmd")
    field(PINI, "YES")
 }
 
-record(stringin, "$(PREFIX)$(M):EGU")
+# RBV from pytmc signal.
+record(stringin, "$(PREFIX)$(M):sEGU_RBV")
 {
     field(DESC, "Motor EGU")
     field(VAL,  "$(EGU)")
     field(PINI, "YES")
 }
+
