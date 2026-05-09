@@ -1,0 +1,352 @@
+# tcmotorRecord.dbd
+#
+# Record type definition for the TwinCAT Motor (tcmotor) record.
+#
+# Provides motor record field naming convention (.VAL, .RBV, .DMOV etc.)
+# for TwinCAT ADS-based motors with no internal motion logic. Each value
+# field is independently linkable to a PLC PV via a corresponding link field.
+#
+# Link field naming convention:
+#   INP_*  — input link fields (CP links from PLC PVs)
+#   OUT_*  — output link fields (PP links to PLC PVs)
+# Value field names match the motor record exactly so clients using
+# $(PREFIX)$(MOTOR).RBV, .VAL, .DMOV etc. work without modification.
+#
+# Usage:
+#   record(tcmotor, "$(PREFIX)$(MOTOR)") {
+#       field(DESC,     "$(MOTOR) TwinCAT Motor")
+#       field(EGU,      "mm")
+#       field(PREC,     "3")
+#       # Input links (driven by PLC)
+#       field(INP_RBV,  "$(PREFIX)$(MOTOR):fActPosition_RBV CP")
+#       field(INP_DMOV, "$(PREFIX)$(MOTOR):bDone_RBV CP")
+#       field(INP_MOVN, "$(PREFIX)$(MOTOR):bMoving_RBV CP")
+#       field(INP_HLS,  "$(PREFIX)$(MOTOR):bLimitFwd_RBV CP")
+#       field(INP_LLS,  "$(PREFIX)$(MOTOR):bLimitBwd_RBV CP")
+#       field(INP_ATHM, "$(PREFIX)$(MOTOR):bHomed_RBV CP")
+#       field(INP_TDIR, "$(PREFIX)$(MOTOR):nTDIR_RBV CP")
+#       # Output links (write to PLC)
+#       field(OUT_VAL,  "$(PREFIX)$(MOTOR):fPosition PP")
+#       field(OUT_STOP, "$(PREFIX)$(MOTOR):bHalt PP")
+#       field(OUT_HOMF, "$(PREFIX)$(MOTOR):bHomeCmd PP")
+#       field(OUT_HOMR, "$(PREFIX)$(MOTOR):bHomeCmdRev PP")
+#       field(OUT_VELO, "$(PREFIX)$(MOTOR):fVelocity PP")
+#       field(OUT_ACCL, "$(PREFIX)$(MOTOR):fAcclTime PP")
+#       field(OUT_CNEN, "$(PREFIX)$(MOTOR):bUserEnable PP")
+#   }
+
+recordtype(tcmotor) {
+
+    # -----------------------------------------------------------------------
+    # Standard fields common to all records
+    # -----------------------------------------------------------------------
+    include "dbCommon.dbd"
+
+    # -----------------------------------------------------------------------
+    # Display / engineering fields (local, no links)
+    # -----------------------------------------------------------------------
+    field(EGU, DBF_STRING) {
+        prompt("Engineering Units")
+        promptgroup("80 - Display")
+        special(SPC_MOD)
+        interest(1)
+        size(16)
+    }
+    field(PREC, DBF_SHORT) {
+        prompt("Display Precision")
+        promptgroup("80 - Display")
+        interest(1)
+    }
+    field(HOPR, DBF_DOUBLE) {
+        prompt("High Operating Range")
+        promptgroup("80 - Display")
+        interest(1)
+    }
+    field(LOPR, DBF_DOUBLE) {
+        prompt("Low Operating Range")
+        promptgroup("80 - Display")
+        interest(1)
+    }
+    field(DRVH, DBF_DOUBLE) {
+        prompt("Drive High Limit")
+        promptgroup("30 - Action")
+        interest(1)
+    }
+    field(DRVL, DBF_DOUBLE) {
+        prompt("Drive Low Limit")
+        promptgroup("30 - Action")
+        interest(1)
+    }
+
+    # -----------------------------------------------------------------------
+    # Input fields
+    # Value field names match the motor record exactly.
+    # Link fields use INP_* prefix — completely distinct from value fields
+    # so $(PREFIX)$(MOTOR).RBV is the position readback, not the link.
+    # -----------------------------------------------------------------------
+
+    field(INP_RBV, DBF_INLINK) {
+        prompt("Readback Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(RBV, DBF_DOUBLE) {
+        prompt("Readback Value")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    field(INP_DMOV, DBF_INLINK) {
+        prompt("Done Moving Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(DMOV, DBF_SHORT) {
+        prompt("Done Moving")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    field(INP_MOVN, DBF_INLINK) {
+        prompt("Moving Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(MOVN, DBF_SHORT) {
+        prompt("Motor Is Moving")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    field(INP_HLS, DBF_INLINK) {
+        prompt("High Limit Switch Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(HLS, DBF_SHORT) {
+        prompt("At High Limit Switch")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    field(INP_LLS, DBF_INLINK) {
+        prompt("Low Limit Switch Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(LLS, DBF_SHORT) {
+        prompt("At Low Limit Switch")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    field(INP_ATHM, DBF_INLINK) {
+        prompt("At Home Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(ATHM, DBF_SHORT) {
+        prompt("At HOME")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    field(INP_TDIR, DBF_INLINK) {
+        prompt("Travel Direction Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(TDIR, DBF_SHORT) {
+        prompt("Direction of Travel")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    # -----------------------------------------------------------------------
+    # Output fields
+    # Value field names match the motor record exactly.
+    # Each output field has:
+    #   OUT_* — outlink to forward operator writes to the PLC PV
+    #   RBK_* — inlink (CP) to read back the current PLC value so that
+    #           VAL/VELO/ACCL etc. always reflect what the PLC has, whether
+    #           the write came from EPICS or from the PLC side directly.
+    # -----------------------------------------------------------------------
+
+    field(VAL, DBF_DOUBLE) {
+        prompt("Desired Position")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        pp(TRUE)
+        interest(1)
+    }
+    field(OUT_VAL, DBF_OUTLINK) {
+        prompt("Position Output Link")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    field(RBK_VAL, DBF_INLINK) {
+        prompt("Position Readback Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+
+    field(STOP, DBF_SHORT) {
+        prompt("Stop")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        pp(TRUE)
+        interest(1)
+    }
+    field(OUT_STOP, DBF_OUTLINK) {
+        prompt("Stop Output Link")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    field(RBK_STOP, DBF_INLINK) {
+        prompt("Stop Readback Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+
+    field(HOMF, DBF_SHORT) {
+        prompt("Home Forward")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        pp(TRUE)
+        interest(1)
+    }
+    field(OUT_HOMF, DBF_OUTLINK) {
+        prompt("Home Forward Output Link")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    field(RBK_HOMF, DBF_INLINK) {
+        prompt("Home Forward Readback Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+
+    field(HOMR, DBF_SHORT) {
+        prompt("Home Reverse")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        pp(TRUE)
+        interest(1)
+    }
+    field(OUT_HOMR, DBF_OUTLINK) {
+        prompt("Home Reverse Output Link")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    field(RBK_HOMR, DBF_INLINK) {
+        prompt("Home Reverse Readback Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+
+    field(VELO, DBF_DOUBLE) {
+        prompt("Velocity (EGU/s)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        pp(TRUE)
+        interest(1)
+    }
+    field(OUT_VELO, DBF_OUTLINK) {
+        prompt("Velocity Output Link")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    field(RBK_VELO, DBF_INLINK) {
+        prompt("Velocity Readback Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+
+    field(ACCL, DBF_DOUBLE) {
+        prompt("Seconds to Velocity")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        pp(TRUE)
+        interest(1)
+    }
+    field(OUT_ACCL, DBF_OUTLINK) {
+        prompt("Acceleration Output Link")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    field(RBK_ACCL, DBF_INLINK) {
+        prompt("Acceleration Readback Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+
+    field(CNEN, DBF_SHORT) {
+        prompt("Enable Control")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        pp(TRUE)
+        interest(1)
+    }
+    field(OUT_CNEN, DBF_OUTLINK) {
+        prompt("Enable Control Output Link")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    field(RBK_CNEN, DBF_INLINK) {
+        prompt("Enable Control Readback Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+
+    # -----------------------------------------------------------------------
+    # Internal tracking fields — not accessible by CA clients (SPC_NOMOD)
+    # -----------------------------------------------------------------------
+    field(LVAL, DBF_DOUBLE) {
+        prompt("Last Val Monitored")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LRBV, DBF_DOUBLE) {
+        prompt("Last RBV Monitored")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    # Last-sent output values — suppress redundant dbPutLink calls to the
+    # ADS driver when a CP input update triggers process but no output
+    # field has been modified by an operator.
+    field(LOVL, DBF_DOUBLE) {
+        prompt("Last Output Val Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LSTO, DBF_SHORT) {
+        prompt("Last Stop Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LHOF, DBF_SHORT) {
+        prompt("Last HomF Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LHOR, DBF_SHORT) {
+        prompt("Last HomR Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LVEL, DBF_DOUBLE) {
+        prompt("Last Velo Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LACC, DBF_DOUBLE) {
+        prompt("Last Accl Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LCNE, DBF_SHORT) {
+        prompt("Last CnEn Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+}

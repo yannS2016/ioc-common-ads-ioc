@@ -19,6 +19,7 @@ ARCHIVE +=
 REQ +=
 
 DB += motor.template
+DB += tcmotor.template
 DB += motor.proto
 DB += EthercatMC.template
 DB += EthercatMCdebug.template

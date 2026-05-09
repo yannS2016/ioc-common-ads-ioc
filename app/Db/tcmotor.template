@@ -1,0 +1,64 @@
+# tcmotor.db
+#
+# Template for a single TwinCAT motor record instance.
+#
+# Macros:
+#   PREFIX   - PV prefix (e.g. TST:MOTION:)
+#   MOTOR    - Motor name (e.g. M1)
+#   DESC     - Motor description
+#   EGU      - Engineering units (e.g. mm)
+#   PREC     - Display precision (e.g. 3)
+#   HOPR     - High operating range
+#   LOPR     - Low operating range
+#   DRVH     - Drive high limit
+#   DRVL     - Drive low limit
+#
+# Output fields (VAL, VELO etc.) read back from the corresponding PLC _RBV
+# record so that the tcmotor field always reflects the PLC-confirmed value.
+# If the PLC clamps or rejects a write, the EPICS field will show what the
+# PLC actually accepted rather than what was requested.
+
+record(tcmotor, "$(PREFIX)$(M)") {
+    field(DESC,  "$(DESC=TwinCAT Motor)")
+    field(EGU,   "$(EGU=mm)")
+    field(PREC,  "$(PREC=3)")
+    field(HOPR,  "$(HOPR=100)")
+    field(LOPR,  "$(LOPR=-100)")
+    field(DRVH,  "$(DRVH=100)")
+    field(DRVL,  "$(DRVL=-100)")
+
+    # ------------------------------------------------------------------
+    # Input links — status driven by PLC (CP: update on change)
+    # ------------------------------------------------------------------
+    field(INP_RBV,  "$(PREFIX)$(M):fActPosition_RBV CP")
+    field(INP_DMOV, "$(PREFIX)$(M):bDone_RBV CP")
+    field(INP_MOVN, "$(PREFIX)$(M):bMoving_RBV CP")
+    field(INP_HLS,  "$(PREFIX)$(M):bLimitFwd_RBV CP")
+    field(INP_LLS,  "$(PREFIX)$(M):bLimitBwd_RBV CP")
+    field(INP_ATHM, "$(PREFIX)$(M):bHomed_RBV CP")
+#    field(INP_TDIR, "$(PREFIX)$(M):nTDIR_RBV CP")
+
+    # ------------------------------------------------------------------
+    # Output links — forward operator writes to PLC (PP: process on put)
+    # ------------------------------------------------------------------
+    field(OUT_VAL,  "$(PREFIX)$(M):fPosition PP")
+    field(OUT_STOP, "$(PREFIX)$(M):bHalt PP")
+    field(OUT_HOMF, "$(PREFIX)$(M):bHomeCmd PP")
+#    field(OUT_HOMR, "$(PREFIX)$(M):bHomeCmdRev PP")
+    field(OUT_VELO, "$(PREFIX)$(M):fVelocity PP")
+ #   field(OUT_ACCL, "$(PREFIX)$(M):fAcclTime PP")
+ #   field(OUT_CNEN, "$(PREFIX)$(M):fbInterlock:bUserEnable PP")
+
+    # ------------------------------------------------------------------
+    # Output readback links — confirm PLC acknowledged the write (CP)
+    # Points to the _RBV counterpart of each output PV so VAL, VELO etc.
+    # reflect the PLC-confirmed value, not just what EPICS requested.
+    # ------------------------------------------------------------------
+    field(RBK_VAL,  "$(PREFIX)$(M):fPosition_RBV CP")
+    field(RBK_STOP, "$(PREFIX)$(M):bHalt_RBV CP")
+    field(RBK_HOMF, "$(PREFIX)$(M):bHomeCmd_RBV CP")
+#    field(RBK_HOMR, "$(PREFIX)$(M):bHomeCmdRev_RBV CP")
+    field(RBK_VELO, "$(PREFIX)$(M):fVelocity_RBV CP")
+ #   field(RBK_ACCL, "$(PREFIX)$(M):fAcclTime_RBV CP")
+ #   field(RBK_CNEN, "$(PREFIX)$(M):fbInterlock:bUserEnable_RBV CP")
+}
