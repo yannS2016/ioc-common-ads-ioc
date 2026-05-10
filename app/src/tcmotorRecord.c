@@ -6,19 +6,33 @@
  * Provides motor record field naming convention (.VAL, .RBV, .DMOV etc.)
  * for TwinCAT ADS-based motors with no internal motion logic.
  *
- * Each output field has:
- *   OUT_* — outlink to forward operator writes to the PLC PV
- *   RBK_* — inlink (CP) from the corresponding PLC _RBV record.
- *            Reading the _RBV confirms the PLC acknowledged the write.
- *            If the PLC clamps or rejects the value, the EPICS field
- *            reflects what the PLC actually accepted.
+ * Computed fields (derived each cycle, not directly linked):
  *
- * Roundtrip for VAL:
- *   caput TST:M1.VAL 150
- *     -> OUT_VAL puts to fPosition
- *     -> PLC acknowledges, updates fPosition_RBV
- *     -> RBK_VAL CP fires, reads fPosition_RBV into VAL
- *     -> TST:M1.VAL now shows PLC-confirmed value
+ *   TDIR  — computed from INP_NDIR and INP_PDIR booleans:
+ *             1 if bPositiveDirection, 0 if bNegativeDirection,
+ *             unchanged when motor is stopped (neither active).
+ *
+ *   MSTA  — motor status word computed from all status bools following
+ *             motor record bit convention (see bit layout in dbd).
+ *
+ *   SPMG  — Stop/Pause/Move/Go state machine owned by tcmotor,
+ *             replacing FB_MotionSPMG in the PLC:
+ *             0=Stop/1=Pause -> assert bHalt
+ *             2=Move         -> clear bHalt, trigger bMoveCmd,
+ *                               auto-revert to Pause(1) when DMOV goes high
+ *             3=Go           -> clear bHalt, normal operation
+ *
+ *   HOMF/HOMR special handler:
+ *             HOMF -> eHomeMode=LOW_LIMIT(1)  + bHomeCmd=1
+ *             HOMR -> eHomeMode=HIGH_LIMIT(2) + bHomeCmd=1
+ *             Both share OUT_HOMF (bHomeCmd) and OUT_HMOD (eHomeMode).
+ *
+ * Output forwarding:
+ *   Outputs forwarded only when changed (last-sent cache).
+ *   RBK_* links read only when no output was forwarded this cycle,
+ *   preventing operator writes from being overwritten by stale PLC values.
+ *   When RBK_* is read, last-sent cache is updated to prevent re-forwarding
+ *   of PLC-clamped values.
  *
  * Derived from the aSub record implementation pattern (aSubRecord.c).
  * Targets EPICS Base 7 -- get_value/valueDes API was removed in Base 7.
@@ -47,10 +61,33 @@
 #undef GEN_SIZE_OFFSET
 
 /* -------------------------------------------------------------------------
+ * eHomeMode enum values (must match E_EpicsHomeCmd in TwinCAT)
+ * ------------------------------------------------------------------------- */
+#define HOME_LOW_LIMIT  1   /* HOMF: home via low limit switch  */
+#define HOME_HIGH_LIMIT 2   /* HOMR: home via high limit switch */
+
+/* -------------------------------------------------------------------------
+ * MSTA bit masks (motor record convention)
+ * ------------------------------------------------------------------------- */
+#define MSTA_DIRECTION  0x0001  /* 0=positive, 1=negative */
+#define MSTA_DONE       0x0002
+#define MSTA_PLUS_LS    0x0004  /* high limit switch */
+#define MSTA_HOME_SWITCH 0x0008
+#define MSTA_MINUS_LS   0x0020  /* low limit switch */
+#define MSTA_HOMED      0x0040
+#define MSTA_PRESENT    0x0080  /* always set */
+#define MSTA_PROBLEM    0x0100  /* error */
+#define MSTA_MOVING     0x0200
+#define MSTA_COMM_ERR   0x0800
+#define MSTA_AT_HOME    0x1000
+#define MSTA_HOMING     0x8000
+
+/* -------------------------------------------------------------------------
  * Forward declarations
  * ------------------------------------------------------------------------- */
 static long init_record(struct dbCommon *pcommon, int pass);
 static long process(struct dbCommon *pcommon);
+static long special(DBADDR *paddr, int after);
 static long cvt_dbaddr(DBADDR *paddr);
 static long get_array_info(DBADDR *paddr, long *no_elements, long *offset);
 static long get_units(DBADDR *paddr, char *units);
@@ -69,7 +106,7 @@ struct rset tcmotorRSET = {
     NULL,           /* initialize */
     init_record,
     process,
-    NULL,           /* special */
+    special,
     NULL,           /* get_value -- removed in Base 7 */
     cvt_dbaddr,
     get_array_info,
@@ -104,7 +141,7 @@ static long read_input(tcmotorRecord *prec, DBLINK *plink, double *pval)
 }
 
 /* -------------------------------------------------------------------------
- * Helper: write one output link from a double value, return 0 on success
+ * Helper: write a double value to an output link
  * ------------------------------------------------------------------------- */
 static long write_output(tcmotorRecord *prec, DBLINK *plink, double val)
 {
@@ -121,7 +158,7 @@ static long write_output(tcmotorRecord *prec, DBLINK *plink, double val)
 }
 
 /* -------------------------------------------------------------------------
- * Helper: write one output link from a short value, return 0 on success
+ * Helper: write a short value to an output link
  * ------------------------------------------------------------------------- */
 static long write_output_short(tcmotorRecord *prec, DBLINK *plink, short val)
 {
@@ -138,12 +175,131 @@ static long write_output_short(tcmotorRecord *prec, DBLINK *plink, short val)
 }
 
 /* -------------------------------------------------------------------------
+ * compute_lvio
+ * Limit violation: 1 if RBV outside soft limits, 0 otherwise.
+ * Only checks when limits are non-zero (unconfigured links leave HLM/LLM=0).
+ * ------------------------------------------------------------------------- */
+static void compute_lvio(tcmotorRecord *prec)
+{
+    if (prec->hlm != 0.0 || prec->llm != 0.0)
+        prec->lvio = (prec->rbv > prec->hlm || prec->rbv < prec->llm) ? 1 : 0;
+    else
+        prec->lvio = 0;
+}
+
+/* -------------------------------------------------------------------------
+ * compute_tdir
+ * Derive TDIR from NDIR/PDIR bools.
+ * 1 = positive direction, 0 = negative direction.
+ * Left unchanged when motor is stopped (neither flag active).
+ * ------------------------------------------------------------------------- */
+static void compute_tdir(tcmotorRecord *prec)
+{
+    if (prec->pdir)
+        prec->tdir = 1;
+    else if (prec->ndir)
+        prec->tdir = 0;
+    /* else: motor stopped, leave TDIR unchanged (last known direction) */
+}
+
+/* -------------------------------------------------------------------------
+ * compute_msta
+ * Build the MSTA motor status word from individual status bools.
+ * Bit layout follows motor record convention.
+ * ------------------------------------------------------------------------- */
+static void compute_msta(tcmotorRecord *prec)
+{
+    epicsUInt32 msta = MSTA_PRESENT;  /* bit 7 always set — motor is present */
+
+    if (prec->ndir) msta |= MSTA_DIRECTION;  /* 0=pos, 1=neg */
+    if (prec->dmov) msta |= MSTA_DONE;
+    if (prec->hls)  msta |= MSTA_PLUS_LS;
+    if (prec->hsen) msta |= MSTA_HOME_SWITCH;
+    if (prec->lls)  msta |= MSTA_MINUS_LS;
+    if (prec->athm) msta |= MSTA_HOMED;
+    if (prec->athm) msta |= MSTA_AT_HOME;
+    if (prec->lerr) msta |= MSTA_PROBLEM;
+    if (prec->movn) msta |= MSTA_MOVING;
+    if (prec->hmng) msta |= MSTA_HOMING;
+
+    /* Set comm error bit if any link is in alarm */
+    if (prec->stat == LINK_ALARM)
+        msta |= MSTA_COMM_ERR;
+
+    prec->msta = msta;
+}
+
+/* -------------------------------------------------------------------------
+ * process_spmg
+ * SPMG state machine — runs every process cycle.
+ * Replaces FB_MotionSPMG in the PLC.
+ *
+ *   0 = Stop  — assert bHalt (decelerated stop, no resume)
+ *   1 = Pause — assert bHalt (decelerated stop, position held)
+ *   2 = Move  — clear bHalt, trigger bMoveCmd once,
+ *               auto-revert to Pause(1) when DMOV goes high
+ *   3 = Go    — clear bHalt, normal operation
+ *
+ * Safety: bHalt=1 is ALWAYS written unconditionally when SPMG is Stop or
+ * Pause — the last-sent cache (lsto) is bypassed for the halt direction.
+ * A stop command must never be suppressed. Only bHalt=0 (clear) uses the
+ * cache to avoid redundant ADS writes.
+ * ------------------------------------------------------------------------- */
+static void process_spmg(tcmotorRecord *prec)
+{
+    short halt = 0;
+    short mcmd = 0;
+
+    switch (prec->spmg) {
+        case 0: /* Stop */
+        case 1: /* Pause */
+            halt = 1;
+            break;
+
+        case 2: /* Move — trigger one move, revert to Pause when done */
+            halt = 0;
+            if (!prec->bmov) {
+                /* First cycle in Move state — trigger bMoveCmd unconditionally
+                 * regardless of DMOV. DMOV may still be 1 from a previous move;
+                 * we must send the command before checking for completion. */
+                mcmd = 1;
+                prec->bmov = 1;  /* mark move as triggered */
+            } else if (prec->dmov) {
+                /* Move was triggered and motion is now complete — revert to Pause */
+                prec->spmg = 1;
+                prec->bmov = 0;
+                halt = 1;
+            }
+            break;
+
+        case 3: /* Go — normal operation */
+            halt = 0;
+            break;
+
+        default:
+            /* Unknown state — default to Stop for safety */
+            prec->spmg = 0;
+            halt = 1;
+            break;
+    }
+
+    if (halt != prec->lsto) {
+        write_output_short(prec, &prec->out_stop, halt);
+        prec->lsto = halt;
+        prec->stop = halt;
+    }
+
+    /* bMoveCmd is a pulse — write when Move state is active */
+    if (mcmd)
+        write_output_short(prec, &prec->out_mcmd, 1);
+}
+
+/* -------------------------------------------------------------------------
  * init_record
  *
- * Pass 0: nothing to do -- links are not yet resolved
+ * Pass 0: nothing to do -- links not yet resolved
  * Pass 1: read all input and readback links for initial values,
- *         seed last-sent output cache to suppress spurious ADS writes
- *         on the first process cycle.
+ *         seed last-sent output cache to suppress spurious ADS writes.
  * ------------------------------------------------------------------------- */
 static long init_record(struct dbCommon *pcommon, int pass)
 {
@@ -153,40 +309,54 @@ static long init_record(struct dbCommon *pcommon, int pass)
     if (pass == 0)
         return 0;
 
-    /* Initial read of all pure input fields */
-    read_input(prec, &prec->inp_rbv, &prec->rbv);
+    /* Read pure input links */
+    read_input(prec, &prec->inp_rbv,  &prec->rbv);
 
     v = prec->dmov; read_input(prec, &prec->inp_dmov, &v); prec->dmov = (short)v;
     v = prec->movn; read_input(prec, &prec->inp_movn, &v); prec->movn = (short)v;
     v = prec->hls;  read_input(prec, &prec->inp_hls,  &v); prec->hls  = (short)v;
     v = prec->lls;  read_input(prec, &prec->inp_lls,  &v); prec->lls  = (short)v;
     v = prec->athm; read_input(prec, &prec->inp_athm, &v); prec->athm = (short)v;
-    v = prec->tdir; read_input(prec, &prec->inp_tdir, &v); prec->tdir = (short)v;
+    v = prec->ndir; read_input(prec, &prec->inp_ndir, &v); prec->ndir = (short)v;
+    v = prec->pdir; read_input(prec, &prec->inp_pdir, &v); prec->pdir = (short)v;
+    v = prec->lerr; read_input(prec, &prec->inp_err,  &v); prec->lerr = (short)v;
+    v = prec->hsen; read_input(prec, &prec->inp_hsen, &v); prec->hsen = (short)v;
+    v = prec->hmng; read_input(prec, &prec->inp_hmng, &v); prec->hmng = (short)v;
 
-    /* Initial read of output readbacks (fPosition_RBV, fVelocity_RBV etc.)
-     * so VAL, VELO etc. reflect the PLC-confirmed value from the start. */
+    /* Compute derived fields */
+    compute_tdir(prec);
+    compute_msta(prec);
+
+    /* Read output readback links for initial confirmed values */
     read_input(prec, &prec->rbk_val,  &prec->val);
-    v = prec->stop; read_input(prec, &prec->rbk_stop, &v); prec->stop = (short)v;
     v = prec->homf; read_input(prec, &prec->rbk_homf, &v); prec->homf = (short)v;
-    v = prec->homr; read_input(prec, &prec->rbk_homr, &v); prec->homr = (short)v;
     read_input(prec, &prec->rbk_velo, &prec->velo);
-    read_input(prec, &prec->rbk_accl, &prec->accl);
+    read_input(prec, &prec->rbk_accs, &prec->accs);
     v = prec->cnen; read_input(prec, &prec->rbk_cnen, &v); prec->cnen = (short)v;
+    read_input(prec, &prec->rbk_hlm,  &prec->hlm);
+    read_input(prec, &prec->rbk_llm,  &prec->llm);
+    read_input(prec, &prec->rbk_bdst, &prec->bdst);
+    v = prec->jogf; read_input(prec, &prec->rbk_jogf, &v); prec->jogf = (short)v;
+    v = prec->jogr; read_input(prec, &prec->rbk_jogr, &v); prec->jogr = (short)v;
+    read_input(prec, &prec->rbk_jif, &prec->ljif);
+    read_input(prec, &prec->rbk_jir, &prec->ljir);
+
+    /* Compute LVIO after soft limits are initialised */
+    compute_lvio(prec);
 
     /* Initialise monitor tracking */
     prec->lval = prec->val;
     prec->lrbv = prec->rbv;
 
-    /* Seed last-sent output cache from the PLC-confirmed readback values.
-     * Prevents the first CP-triggered process from forwarding all outputs
-     * as "changed" when they are already in sync with the PLC. */
+    /* Seed last-sent output cache from PLC-confirmed readback values */
     prec->lovl = prec->val;
     prec->lsto = prec->stop;
-    prec->lhof = prec->homf;
-    prec->lhor = prec->homr;
     prec->lvel = prec->velo;
-    prec->lacc = prec->accl;
+    prec->lacs = prec->accs;
     prec->lcne = prec->cnen;
+    prec->lhlm = prec->hlm;
+    prec->lllm = prec->llm;
+    prec->lbds = prec->bdst;
 
     return 0;
 }
@@ -194,65 +364,84 @@ static long init_record(struct dbCommon *pcommon, int pass)
 /* -------------------------------------------------------------------------
  * process
  *
- * Called when triggered by any CP link update (input or output readback)
- * or a CA write to an output field (pp(TRUE) in dbd).
- *
- * Reads all input and readback links, then conditionally forwards output
- * fields to their linked PLC PVs only when the value has changed.
+ * Called when triggered by any CP link update or a CA write to an output
+ * field (pp(TRUE) in dbd) or a special() handler.
  * ------------------------------------------------------------------------- */
 static long process(struct dbCommon *pcommon)
 {
     tcmotorRecord *prec = (tcmotorRecord *)pcommon;
     unsigned short monitor_mask;
     double v;
+    int forwarded = 0;
 
     prec->pact = TRUE;
 
     /* ------------------------------------------------------------------
-     * Read pure input links (status from PLC)
+     * Read all pure input links
      * ------------------------------------------------------------------ */
-    read_input(prec, &prec->inp_rbv, &prec->rbv);
+    read_input(prec, &prec->inp_rbv,  &prec->rbv);
 
     v = prec->dmov; read_input(prec, &prec->inp_dmov, &v); prec->dmov = (short)v;
     v = prec->movn; read_input(prec, &prec->inp_movn, &v); prec->movn = (short)v;
     v = prec->hls;  read_input(prec, &prec->inp_hls,  &v); prec->hls  = (short)v;
     v = prec->lls;  read_input(prec, &prec->inp_lls,  &v); prec->lls  = (short)v;
     v = prec->athm; read_input(prec, &prec->inp_athm, &v); prec->athm = (short)v;
-    v = prec->tdir; read_input(prec, &prec->inp_tdir, &v); prec->tdir = (short)v;
+    v = prec->ndir; read_input(prec, &prec->inp_ndir, &v); prec->ndir = (short)v;
+    v = prec->pdir; read_input(prec, &prec->inp_pdir, &v); prec->pdir = (short)v;
+    v = prec->lerr; read_input(prec, &prec->inp_err,  &v); prec->lerr = (short)v;
+    v = prec->hsen; read_input(prec, &prec->inp_hsen, &v); prec->hsen = (short)v;
+    v = prec->hmng; read_input(prec, &prec->inp_hmng, &v); prec->hmng = (short)v;
 
     /* ------------------------------------------------------------------
-     * Forward output fields to PLC PVs only when value has changed.
-     * Track whether any output was forwarded this cycle — if so, skip
-     * reading the RBK links to avoid immediately overwriting the
-     * operator's write with the stale PLC-confirmed value.
-     * The CP link on RBK_* will trigger a new process cycle once the
-     * PLC updates its _RBV, at which point the confirmed value is read.
+     * Compute derived fields
      * ------------------------------------------------------------------ */
-    int forwarded = 0;
-
-    if (prec->val  != prec->lovl) { write_output      (prec, &prec->out_val,  prec->val);  prec->lovl = prec->val;  forwarded = 1; }
-    if (prec->stop != prec->lsto) { write_output_short(prec, &prec->out_stop, prec->stop); prec->lsto = prec->stop; forwarded = 1; }
-    if (prec->homf != prec->lhof) { write_output_short(prec, &prec->out_homf, prec->homf); prec->lhof = prec->homf; forwarded = 1; }
-    if (prec->homr != prec->lhor) { write_output_short(prec, &prec->out_homr, prec->homr); prec->lhor = prec->homr; forwarded = 1; }
-    if (prec->velo != prec->lvel) { write_output      (prec, &prec->out_velo, prec->velo); prec->lvel = prec->velo; forwarded = 1; }
-    if (prec->accl != prec->lacc) { write_output      (prec, &prec->out_accl, prec->accl); prec->lacc = prec->accl; forwarded = 1; }
-    if (prec->cnen != prec->lcne) { write_output_short(prec, &prec->out_cnen, prec->cnen); prec->lcne = prec->cnen; forwarded = 1; }
+    compute_tdir(prec);
+    compute_msta(prec);
 
     /* ------------------------------------------------------------------
-     * Read output readback links (PLC-confirmed values) only when no
-     * output was forwarded this cycle. If we forwarded, the RBK CP link
-     * will fire again once the PLC updates its _RBV — we wait for that
-     * rather than overwriting the operator's write with a stale value.
+     * SPMG state machine — manages bHalt and bMoveCmd
+     * ------------------------------------------------------------------ */
+    process_spmg(prec);
+
+    /* ------------------------------------------------------------------
+     * Forward output fields to PLC only when value has changed.
+     * Skip RBK reads this cycle if anything was forwarded.
+     * ------------------------------------------------------------------ */
+    if (prec->val  != prec->lovl) { write_output      (prec, &prec->out_val,  prec->val);  prec->lovl = prec->val;  forwarded = 1; }
+    if (prec->velo != prec->lvel) { write_output      (prec, &prec->out_velo, prec->velo); prec->lvel = prec->velo; forwarded = 1; }
+    if (prec->accs != prec->lacs) {
+        write_output(prec, &prec->out_accs, prec->accs);
+        write_output(prec, &prec->out_decs, prec->accs);
+        prec->lacs = prec->accs;
+        forwarded = 1;
+    }
+    if (prec->cnen != prec->lcne) { write_output_short(prec, &prec->out_cnen, prec->cnen); prec->lcne = prec->cnen; forwarded = 1; }
+    if (prec->hlm  != prec->lhlm) { write_output(prec, &prec->out_hlm,  prec->hlm);  prec->lhlm = prec->hlm;  forwarded = 1; }
+    if (prec->llm  != prec->lllm) { write_output(prec, &prec->out_llm,  prec->llm);  prec->lllm = prec->llm;  forwarded = 1; }
+    if (prec->bdst != prec->lbds) { write_output(prec, &prec->out_bdst, prec->bdst); prec->lbds = prec->bdst; forwarded = 1; }
+
+    /* ------------------------------------------------------------------
+     * Read output readback links only when no output was forwarded.
+     * Update last-sent cache when reading readback to prevent re-forwarding
+     * of PLC-clamped values on the next cycle.
      * ------------------------------------------------------------------ */
     if (!forwarded) {
         read_input(prec, &prec->rbk_val,  &prec->val);  prec->lovl = prec->val;
-        v = prec->stop; read_input(prec, &prec->rbk_stop, &v); prec->stop = (short)v; prec->lsto = prec->stop;
-        v = prec->homf; read_input(prec, &prec->rbk_homf, &v); prec->homf = (short)v; prec->lhof = prec->homf;
-        v = prec->homr; read_input(prec, &prec->rbk_homr, &v); prec->homr = (short)v; prec->lhor = prec->homr;
-        read_input(prec, &prec->rbk_velo, &prec->velo);  prec->lvel = prec->velo;
-        read_input(prec, &prec->rbk_accl, &prec->accl);  prec->lacc = prec->accl;
+        read_input(prec, &prec->rbk_velo, &prec->velo); prec->lvel = prec->velo;
+        read_input(prec, &prec->rbk_accs, &prec->accs); prec->lacs = prec->accs;
         v = prec->cnen; read_input(prec, &prec->rbk_cnen, &v); prec->cnen = (short)v; prec->lcne = prec->cnen;
+        v = prec->homf; read_input(prec, &prec->rbk_homf, &v); prec->homf = (short)v;
+        read_input(prec, &prec->rbk_hlm,  &prec->hlm);  prec->lhlm = prec->hlm;
+        read_input(prec, &prec->rbk_llm,  &prec->llm);  prec->lllm = prec->llm;
+        read_input(prec, &prec->rbk_bdst, &prec->bdst); prec->lbds = prec->bdst;
+        v = prec->jogf; read_input(prec, &prec->rbk_jogf, &v); prec->jogf = (short)v;
+        v = prec->jogr; read_input(prec, &prec->rbk_jogr, &v); prec->jogr = (short)v;
+        read_input(prec, &prec->rbk_jif, &prec->ljif);
+        read_input(prec, &prec->rbk_jir, &prec->ljir);
     }
+
+    /* Recompute LVIO after RBV and soft limits are updated */
+    compute_lvio(prec);
 
     /* ------------------------------------------------------------------
      * Timestamps and alarms
@@ -260,33 +449,57 @@ static long process(struct dbCommon *pcommon)
     recGblGetTimeStamp(prec);
 
     /* ------------------------------------------------------------------
-     * Post monitors
+     * Post monitors — only post when value has actually changed.
+     * Each field is compared against its L* (last-posted) counterpart.
      * ------------------------------------------------------------------ */
     monitor_mask = recGblResetAlarms(prec);
 
+    #define POST_IF_CHG_S(fld, last) \
+        if (prec->fld != prec->last) { \
+            db_post_events(prec, &prec->fld, DBE_VALUE | DBE_LOG); \
+            prec->last = prec->fld; \
+        }
+    #define POST_IF_CHG_D(fld, last) \
+        if (prec->fld != prec->last) { \
+            db_post_events(prec, &prec->fld, DBE_VALUE | DBE_LOG); \
+            prec->last = prec->fld; \
+        }
+
     if (prec->lrbv != prec->rbv) {
-        monitor_mask |= DBE_VALUE | DBE_LOG;
+        db_post_events(prec, &prec->rbv, DBE_VALUE | DBE_LOG);
         prec->lrbv = prec->rbv;
     }
     if (prec->lval != prec->val) {
         monitor_mask |= DBE_VALUE | DBE_LOG;
         prec->lval = prec->val;
     }
-
     if (monitor_mask)
         db_post_events(prec, &prec->val, monitor_mask);
 
-    db_post_events(prec, &prec->rbv,  DBE_VALUE | DBE_LOG);
-    db_post_events(prec, &prec->dmov, DBE_VALUE | DBE_LOG);
-    db_post_events(prec, &prec->movn, DBE_VALUE | DBE_LOG);
-    db_post_events(prec, &prec->hls,  DBE_VALUE | DBE_LOG);
-    db_post_events(prec, &prec->lls,  DBE_VALUE | DBE_LOG);
-    db_post_events(prec, &prec->athm, DBE_VALUE | DBE_LOG);
-    db_post_events(prec, &prec->tdir, DBE_VALUE | DBE_LOG);
-    db_post_events(prec, &prec->stop, DBE_VALUE | DBE_LOG);
-    db_post_events(prec, &prec->velo, DBE_VALUE | DBE_LOG);
-    db_post_events(prec, &prec->accl, DBE_VALUE | DBE_LOG);
-    db_post_events(prec, &prec->cnen, DBE_VALUE | DBE_LOG);
+    POST_IF_CHG_S(dmov, ldmov)
+    POST_IF_CHG_S(movn, lmovn)
+    POST_IF_CHG_S(hls,  lhls)
+    POST_IF_CHG_S(lls,  llls)
+    POST_IF_CHG_S(athm, lathm)
+    POST_IF_CHG_S(tdir, ltdir)
+    POST_IF_CHG_S(stop, lstop)
+    POST_IF_CHG_S(spmg, lspmg)
+    POST_IF_CHG_S(cnen, lcnen)
+    POST_IF_CHG_S(lvio, llvio)
+    POST_IF_CHG_S(jogf, ljogf)
+    POST_IF_CHG_S(jogr, ljogr)
+    if (prec->msta != prec->lmsta) {
+        db_post_events(prec, &prec->msta, DBE_VALUE | DBE_LOG);
+        prec->lmsta = prec->msta;
+    }
+    POST_IF_CHG_D(velo, lvelo)
+    POST_IF_CHG_D(accs, laccs)
+    POST_IF_CHG_D(hlm,  lhlm2)
+    POST_IF_CHG_D(llm,  lllm2)
+    POST_IF_CHG_D(bdst, lbdst)
+
+    #undef POST_IF_CHG_S
+    #undef POST_IF_CHG_D
 
     recGblFwdLink(prec);
     prec->pact = FALSE;
@@ -294,7 +507,109 @@ static long process(struct dbCommon *pcommon)
 }
 
 /* -------------------------------------------------------------------------
- * cvt_dbaddr - called when a field is accessed by dbNameToAddr
+ * special
+ *
+ * Called when a field marked special(SPC_MOD) is written by a CA client.
+ * Handles HOMF, HOMR, and SPMG which require side effects beyond a simple
+ * dbPutLink.
+ *
+ * after=0: called before the field is updated (validation opportunity)
+ * after=1: called after the field is updated — this is where we act
+ * ------------------------------------------------------------------------- */
+static long special(DBADDR *paddr, int after)
+{
+    tcmotorRecord *prec = (tcmotorRecord *)paddr->precord;
+    short hmode;
+
+    if (!after)
+        return 0;
+
+    if (paddr->pfield == (void *)&prec->stop) {
+        /*
+         * STOP written directly by operator (e.g. caput M1.STOP 1).
+         * Safety: write bHalt immediately and unconditionally — do not
+         * wait for the SPMG state machine to run on the next process cycle.
+         * A stop command must reach the PLC as fast as possible.
+         * Then route through SPMG so state is consistent:
+         *   STOP=1 -> SPMG=0 (Stop state)
+         *   STOP=0 -> SPMG=3 (Go state)
+         */
+        if (prec->stop) {
+            write_output_short(prec, &prec->out_stop, 1);
+            prec->lsto  = 1;
+            prec->spmg  = 0;
+            prec->bmov  = 0;
+        } else {
+            prec->spmg  = 3;
+            prec->bmov  = 0;
+        }
+        dbScanPassive((dbCommon *)prec, (dbCommon *)prec);
+
+    } else if (paddr->pfield == (void *)&prec->homf) {
+        /*
+         * Home forward rising edge — home via low limit switch.
+         * Set eHomeMode = LOW_LIMIT(1) then trigger bHomeCmd.
+         */
+        if (prec->homf) {
+            hmode = HOME_LOW_LIMIT;
+            write_output_short(prec, &prec->out_hmod, hmode);
+            write_output_short(prec, &prec->out_homf, 1);
+        }
+
+    } else if (paddr->pfield == (void *)&prec->homr) {
+        /*
+         * Home reverse rising edge — home via high limit switch.
+         * Set eHomeMode = HIGH_LIMIT(2) then trigger bHomeCmd.
+         */
+        if (prec->homr) {
+            hmode = HOME_HIGH_LIMIT;
+            write_output_short(prec, &prec->out_hmod, hmode);
+            write_output_short(prec, &prec->out_homf, 1);
+        }
+
+    } else if (paddr->pfield == (void *)&prec->spmg) {
+        /*
+         * SPMG written — trigger a process to run the state machine
+         * immediately rather than waiting for the next CP update.
+         */
+        dbScanPassive((dbCommon *)prec, (dbCommon *)prec);
+
+    } else if (paddr->pfield == (void *)&prec->jogf) {
+        /*
+         * Jog forward rising edge:
+         *   1. Write VAL into NC:JogIncrFwd:Goal only if value changed.
+         *   2. Pulse bJogFwdCmd — PLC executes jog and clears the cmd.
+         * No action on falling edge (PLC already cleared the command).
+         */
+        if (prec->jogf) {
+            if (prec->val != prec->ljif) {
+                write_output(prec, &prec->out_jif, prec->val);
+                prec->ljif = prec->val;
+            }
+            write_output_short(prec, &prec->out_jogf, 1);
+        }
+
+    } else if (paddr->pfield == (void *)&prec->jogr) {
+        /*
+         * Jog reverse rising edge:
+         *   1. Write VAL into NC:JogIncrBwd:Goal only if value changed.
+         *   2. Pulse bJogBwdCmd — PLC executes jog and clears the cmd.
+         * No action on falling edge (PLC already cleared the command).
+         */
+        if (prec->jogr) {
+            if (prec->val != prec->ljir) {
+                write_output(prec, &prec->out_jir, prec->val);
+                prec->ljir = prec->val;
+            }
+            write_output_short(prec, &prec->out_jogr, 1);
+        }
+    }
+
+    return 0;
+}
+
+/* -------------------------------------------------------------------------
+ * cvt_dbaddr
  * ------------------------------------------------------------------------- */
 static long cvt_dbaddr(DBADDR *paddr)
 {
@@ -310,7 +625,7 @@ static long get_array_info(DBADDR *paddr, long *no_elements, long *offset)
 }
 
 /* -------------------------------------------------------------------------
- * Metadata routines -- driven by local fields EGU, PREC, HOPR/LOPR, DRVH/DRVL
+ * Metadata routines
  * ------------------------------------------------------------------------- */
 static long get_units(DBADDR *paddr, char *units)
 {

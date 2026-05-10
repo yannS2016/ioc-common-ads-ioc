@@ -12,11 +12,6 @@
 #   LOPR     - Low operating range
 #   DRVH     - Drive high limit
 #   DRVL     - Drive low limit
-#
-# Output fields (VAL, VELO etc.) read back from the corresponding PLC _RBV
-# record so that the tcmotor field always reflects the PLC-confirmed value.
-# If the PLC clamps or rejects a write, the EPICS field will show what the
-# PLC actually accepted rather than what was requested.
 
 record(tcmotor, "$(PREFIX)$(M)") {
     field(DESC,  "$(DESC=TwinCAT Motor)")
@@ -33,32 +28,53 @@ record(tcmotor, "$(PREFIX)$(M)") {
     field(INP_RBV,  "$(PREFIX)$(M):fActPosition_RBV CP")
     field(INP_DMOV, "$(PREFIX)$(M):bDone_RBV CP")
     field(INP_MOVN, "$(PREFIX)$(M):bMoving_RBV CP")
-    field(INP_HLS,  "$(PREFIX)$(M):bLimitFwd_RBV CP")
-    field(INP_LLS,  "$(PREFIX)$(M):bLimitBwd_RBV CP")
+    field(INP_HLS,  "$(PREFIX)$(M):bForwardEnabled_RBV CP")
+    field(INP_LLS,  "$(PREFIX)$(M):bBackwardEnabled_RBV CP")
     field(INP_ATHM, "$(PREFIX)$(M):bHomed_RBV CP")
-#    field(INP_TDIR, "$(PREFIX)$(M):nTDIR_RBV CP")
+    field(INP_NDIR, "$(PREFIX)$(M):bNegativeDirection_RBV CP")
+    field(INP_PDIR, "$(PREFIX)$(M):bPositiveDirection_RBV CP")
+    field(INP_ERR,  "$(PREFIX)$(M):bError_RBV CP")
+    #field(INP_HSEN, "$(PREFIX)$(M):bHomeSensor_RBV CP")
+    field(INP_HMNG, "$(PREFIX)$(M):bHoming_RBV CP")
 
     # ------------------------------------------------------------------
-    # Output links — forward operator writes to PLC (PP: process on put)
+    # Output links — forward operator writes to PLC (PP)
     # ------------------------------------------------------------------
     field(OUT_VAL,  "$(PREFIX)$(M):fPosition PP")
     field(OUT_STOP, "$(PREFIX)$(M):bHalt PP")
     field(OUT_HOMF, "$(PREFIX)$(M):bHomeCmd PP")
-#    field(OUT_HOMR, "$(PREFIX)$(M):bHomeCmdRev PP")
+    field(OUT_HMOD, "$(PREFIX)$(M):eHomeMode PP")
+    field(OUT_MCMD, "$(PREFIX)$(M):bMoveCmd PP")
+    field(OUT_JOGF, "$(PREFIX)$(M):bJogFwdCmd PP")
+    #field(OUT_JIF,  "$(PREFIX)$(M):NC:JogIncFwd:Goal PP")
+    field(OUT_JOGR, "$(PREFIX)$(M):bJogBwdCmd PP")
+    #field(OUT_JIR,  "$(PREFIX)$(M):NC:JogIncBwd:Goal PP")
     field(OUT_VELO, "$(PREFIX)$(M):fVelocity PP")
- #   field(OUT_ACCL, "$(PREFIX)$(M):fAcclTime PP")
- #   field(OUT_CNEN, "$(PREFIX)$(M):fbInterlock:bUserEnable PP")
+    field(OUT_ACCS, "$(PREFIX)$(M):fAcceleration PP")
+    field(OUT_DECS, "$(PREFIX)$(M):fDeceleration PP")
+    field(OUT_CNEN, "$(PREFIX)$(M):bUserEnable PP")
+    field(OUT_HLM,  "$(PREFIX)$(M):NC:MaxPos:Goal PP")
+    field(OUT_LLM,  "$(PREFIX)$(M):NC:MinPos:Goal PP")
+    field(OUT_BDST, "$(PREFIX)$(M):NC:Backlash:Goal PP")
 
     # ------------------------------------------------------------------
-    # Output readback links — confirm PLC acknowledged the write (CP)
-    # Points to the _RBV counterpart of each output PV so VAL, VELO etc.
-    # reflect the PLC-confirmed value, not just what EPICS requested.
+    # Output readback links — PLC-confirmed values (CP from _RBV PVs)
     # ------------------------------------------------------------------
     field(RBK_VAL,  "$(PREFIX)$(M):fPosition_RBV CP")
-    field(RBK_STOP, "$(PREFIX)$(M):bHalt_RBV CP")
+    # RBK_STOP intentionally omitted — bHalt is a pure output driven by
+    # the SPMG state machine. Reading it back via CP would create a scan
+    # loop: process writes bHalt -> bHalt_RBV changes -> CP triggers
+    # process again -> writes bHalt again -> infinite loop.
+    # The lsto cache in process_spmg prevents redundant writes instead.
     field(RBK_HOMF, "$(PREFIX)$(M):bHomeCmd_RBV CP")
-#    field(RBK_HOMR, "$(PREFIX)$(M):bHomeCmdRev_RBV CP")
     field(RBK_VELO, "$(PREFIX)$(M):fVelocity_RBV CP")
- #   field(RBK_ACCL, "$(PREFIX)$(M):fAcclTime_RBV CP")
- #   field(RBK_CNEN, "$(PREFIX)$(M):fbInterlock:bUserEnable_RBV CP")
+    field(RBK_ACCS, "$(PREFIX)$(M):fAcceleration_RBV CP")
+    field(RBK_CNEN, "$(PREFIX)$(M):bUserEnable_RBV CP")
+    field(RBK_HLM,  "$(PREFIX)$(M):NC:MaxPos:Goal_RBV CP")
+    field(RBK_LLM,  "$(PREFIX)$(M):NC:MinPos:Goal_RBV CP")
+    field(RBK_BDST, "$(PREFIX)$(M):NC:Backlash:Goal_RBV CP")
+    field(RBK_JOGF, "$(PREFIX)$(M):bJogFwdCmd_RBV CP")
+    #field(RBK_JIF,  "$(PREFIX)$(M):NC:JogIncFwd:Goal_RBV CP")
+    field(RBK_JOGR, "$(PREFIX)$(M):bJogBwdCmd_RBV CP")
+    #field(RBK_JIR,  "$(PREFIX)$(M):NC:JogIncBwd:Goal_RBV CP")
 }
