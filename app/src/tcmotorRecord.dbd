@@ -329,11 +329,9 @@ recordtype(tcmotor) {
         promptgroup("50 - Output")
         interest(1)
     }
-    field(RBK_HOMF, DBF_INLINK) {
-        prompt("Home Command Readback Link")
-        promptgroup("40 - Input")
-        interest(1)
-    }
+    # RBK_HOMF intentionally omitted — bHomeCmd is a momentary pulse command.
+    # The PLC clears it immediately. Reading it back would overwrite HOMF=0
+    # on the next process cycle, causing repeated homing commands.
 
     field(VELO, DBF_DOUBLE) {
         prompt("Velocity (EGU/s)")
@@ -461,11 +459,7 @@ recordtype(tcmotor) {
         promptgroup("40 - Input")
         interest(1)
     }
-    field(RBK_JOGF, DBF_INLINK) {
-        prompt("Jog Forward Readback Link (bJogFwdCmd_RBV)")
-        promptgroup("40 - Input")
-        interest(1)
-    }
+    # RBK_JOGF intentionally omitted — bJogFwdCmd is a momentary pulse.
 
     field(JOGR, DBF_SHORT) {
         prompt("Jog Reverse")
@@ -490,11 +484,7 @@ recordtype(tcmotor) {
         promptgroup("40 - Input")
         interest(1)
     }
-    field(RBK_JOGR, DBF_INLINK) {
-        prompt("Jog Reverse Readback Link (bJogBwdCmd_RBV)")
-        promptgroup("40 - Input")
-        interest(1)
-    }
+    # RBK_JOGR intentionally omitted — bJogBwdCmd is a momentary pulse.
 
     # -----------------------------------------------------------------------
     # Internal tracking fields — SPC_NOMOD, not accessible by CA clients

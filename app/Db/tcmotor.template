@@ -34,6 +34,9 @@ record(tcmotor, "$(PREFIX)$(M)") {
     field(INP_NDIR, "$(PREFIX)$(M):bNegativeDirection_RBV CP")
     field(INP_PDIR, "$(PREFIX)$(M):bPositiveDirection_RBV CP")
     field(INP_ERR,  "$(PREFIX)$(M):bError_RBV CP")
+# field(INP_HSEN, "$(PREFIX)$(MOTOR):bHomeSensor_RBV CP")
+# Uncomment when bHomeSensor is exposed via pytmc pragma on the axis.
+# If not configured, MSTA HOME_SWITCH bit (0x0008) stays 0.
     #field(INP_HSEN, "$(PREFIX)$(M):bHomeSensor_RBV CP")
     field(INP_HMNG, "$(PREFIX)$(M):bHoming_RBV CP")
 
@@ -46,9 +49,9 @@ record(tcmotor, "$(PREFIX)$(M)") {
     field(OUT_HMOD, "$(PREFIX)$(M):eHomeMode PP")
     field(OUT_MCMD, "$(PREFIX)$(M):bMoveCmd PP")
     field(OUT_JOGF, "$(PREFIX)$(M):bJogFwdCmd PP")
-    #field(OUT_JIF,  "$(PREFIX)$(M):NC:JogIncFwd:Goal PP")
+    #field(OUT_JIF,  "$(PREFIX)$(M):NC:JogIncrFwd:Goal PP")
     field(OUT_JOGR, "$(PREFIX)$(M):bJogBwdCmd PP")
-    #field(OUT_JIR,  "$(PREFIX)$(M):NC:JogIncBwd:Goal PP")
+    #field(OUT_JIR,  "$(PREFIX)$(M):NC:JogIncrBwd:Goal PP")
     field(OUT_VELO, "$(PREFIX)$(M):fVelocity PP")
     field(OUT_ACCS, "$(PREFIX)$(M):fAcceleration PP")
     field(OUT_DECS, "$(PREFIX)$(M):fDeceleration PP")
@@ -66,15 +69,12 @@ record(tcmotor, "$(PREFIX)$(M)") {
     # loop: process writes bHalt -> bHalt_RBV changes -> CP triggers
     # process again -> writes bHalt again -> infinite loop.
     # The lsto cache in process_spmg prevents redundant writes instead.
-    field(RBK_HOMF, "$(PREFIX)$(M):bHomeCmd_RBV CP")
     field(RBK_VELO, "$(PREFIX)$(M):fVelocity_RBV CP")
     field(RBK_ACCS, "$(PREFIX)$(M):fAcceleration_RBV CP")
     field(RBK_CNEN, "$(PREFIX)$(M):bUserEnable_RBV CP")
     field(RBK_HLM,  "$(PREFIX)$(M):NC:MaxPos:Goal_RBV CP")
     field(RBK_LLM,  "$(PREFIX)$(M):NC:MinPos:Goal_RBV CP")
     field(RBK_BDST, "$(PREFIX)$(M):NC:Backlash:Goal_RBV CP")
-    field(RBK_JOGF, "$(PREFIX)$(M):bJogFwdCmd_RBV CP")
-    #field(RBK_JIF,  "$(PREFIX)$(M):NC:JogIncFwd:Goal_RBV CP")
-    field(RBK_JOGR, "$(PREFIX)$(M):bJogBwdCmd_RBV CP")
-    #field(RBK_JIR,  "$(PREFIX)$(M):NC:JogIncBwd:Goal_RBV CP")
+    #field(RBK_JIF,  "$(PREFIX)$(M):NC:JogIncrFwd:Goal_RBV CP")
+    #field(RBK_JIR,  "$(PREFIX)$(M):NC:JogIncrBwd:Goal_RBV CP")
 }
