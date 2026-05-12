@@ -16,6 +16,13 @@
 #   SPMG   — Stop/Pause/Move/Go state machine owned by tcmotor
 #             (replaces FB_MotionSPMG in the PLC)
 
+menu(tcmotorSPMG) {
+    choice(tcmotorSPMG_Stop,  "Stop")
+    choice(tcmotorSPMG_Pause, "Pause")
+    choice(tcmotorSPMG_Move,  "Move")
+    choice(tcmotorSPMG_Go,    "Go")
+}
+
 recordtype(tcmotor) {
 
     # -----------------------------------------------------------------------
@@ -226,7 +233,7 @@ recordtype(tcmotor) {
         prompt("High Soft Limit")
         promptgroup("30 - Action")
         asl(ASL0)
-        pp(TRUE)
+        special(SPC_MOD)
         interest(1)
     }
     field(OUT_HLM, DBF_OUTLINK) {
@@ -234,27 +241,17 @@ recordtype(tcmotor) {
         promptgroup("50 - Output")
         interest(1)
     }
-    field(RBK_HLM, DBF_INLINK) {
-        prompt("High Soft Limit Readback Link (NC:MaxPos:Val_RBV)")
-        promptgroup("40 - Input")
-        interest(1)
-    }
 
     field(LLM, DBF_DOUBLE) {
         prompt("Low Soft Limit")
         promptgroup("30 - Action")
         asl(ASL0)
-        pp(TRUE)
+        special(SPC_MOD)
         interest(1)
     }
     field(OUT_LLM, DBF_OUTLINK) {
         prompt("Low Soft Limit Output Link (NC:MinPos:Goal)")
         promptgroup("50 - Output")
-        interest(1)
-    }
-    field(RBK_LLM, DBF_INLINK) {
-        prompt("Low Soft Limit Readback Link (NC:MinPos:Val_RBV)")
-        promptgroup("40 - Input")
         interest(1)
     }
 
@@ -270,7 +267,7 @@ recordtype(tcmotor) {
         prompt("Desired Position")
         promptgroup("30 - Action")
         asl(ASL0)
-        pp(TRUE)
+        special(SPC_MOD)
         interest(1)
     }
     field(OUT_VAL, DBF_OUTLINK) {
@@ -278,17 +275,11 @@ recordtype(tcmotor) {
         promptgroup("50 - Output")
         interest(1)
     }
-    field(RBK_VAL, DBF_INLINK) {
-        prompt("Position Readback Link")
-        promptgroup("40 - Input")
-        interest(1)
-    }
 
     field(STOP, DBF_SHORT) {
         prompt("Stop")
         promptgroup("30 - Action")
         asl(ASL0)
-        pp(TRUE)
         special(SPC_MOD)
         interest(1)
     }
@@ -337,7 +328,7 @@ recordtype(tcmotor) {
         prompt("Velocity (EGU/s)")
         promptgroup("30 - Action")
         asl(ASL0)
-        pp(TRUE)
+        special(SPC_MOD)
         interest(1)
     }
     field(OUT_VELO, DBF_OUTLINK) {
@@ -345,17 +336,12 @@ recordtype(tcmotor) {
         promptgroup("50 - Output")
         interest(1)
     }
-    field(RBK_VELO, DBF_INLINK) {
-        prompt("Velocity Readback Link")
-        promptgroup("40 - Input")
-        interest(1)
-    }
 
     field(ACCS, DBF_DOUBLE) {
         prompt("Acceleration (EGU/s^2)")
         promptgroup("30 - Action")
         asl(ASL0)
-        pp(TRUE)
+        special(SPC_MOD)
         interest(1)
     }
     field(OUT_ACCS, DBF_OUTLINK) {
@@ -368,27 +354,17 @@ recordtype(tcmotor) {
         promptgroup("50 - Output")
         interest(1)
     }
-    field(RBK_ACCS, DBF_INLINK) {
-        prompt("Acceleration Readback Link (fAcceleration_RBV)")
-        promptgroup("40 - Input")
-        interest(1)
-    }
 
     field(CNEN, DBF_SHORT) {
         prompt("Enable Control")
         promptgroup("30 - Action")
         asl(ASL0)
-        pp(TRUE)
+        special(SPC_MOD)
         interest(1)
     }
     field(OUT_CNEN, DBF_OUTLINK) {
         prompt("Enable Control Output Link")
         promptgroup("50 - Output")
-        interest(1)
-    }
-    field(RBK_CNEN, DBF_INLINK) {
-        prompt("Enable Control Readback Link")
-        promptgroup("40 - Input")
         interest(1)
     }
 
@@ -397,17 +373,12 @@ recordtype(tcmotor) {
         prompt("Backlash Distance (EGU)")
         promptgroup("30 - Action")
         asl(ASL0)
-        pp(TRUE)
+        special(SPC_MOD)
         interest(1)
     }
     field(OUT_BDST, DBF_OUTLINK) {
         prompt("Backlash Output Link (NC:Backlash:Goal)")
         promptgroup("50 - Output")
-        interest(1)
-    }
-    field(RBK_BDST, DBF_INLINK) {
-        prompt("Backlash Readback Link (NC:Backlash:Goal_RBV)")
-        promptgroup("40 - Input")
         interest(1)
     }
 
@@ -417,13 +388,13 @@ recordtype(tcmotor) {
     #   1 = Pause — assert bHalt, position held
     #   2 = Move  — clear bHalt, trigger bMoveCmd, auto-revert to Pause on DMOV
     #   3 = Go    — clear bHalt, normal operation
-    field(SPMG, DBF_SHORT) {
+    field(SPMG, DBF_MENU) {
         prompt("Stop/Pause/Move/Go")
         promptgroup("30 - Action")
         asl(ASL0)
-        pp(TRUE)
         special(SPC_MOD)
         interest(1)
+        menu(tcmotorSPMG)
     }
     field(OUT_MCMD, DBF_OUTLINK) {
         prompt("Move Command Output Link (bMoveCmd)")
@@ -454,11 +425,6 @@ recordtype(tcmotor) {
         promptgroup("50 - Output")
         interest(1)
     }
-    field(RBK_JIF, DBF_INLINK) {
-        prompt("Jog Fwd Increment Readback Link (NC:JogIncrFwd:Goal_RBV)")
-        promptgroup("40 - Input")
-        interest(1)
-    }
     # RBK_JOGF intentionally omitted — bJogFwdCmd is a momentary pulse.
 
     field(JOGR, DBF_SHORT) {
@@ -477,11 +443,6 @@ recordtype(tcmotor) {
     field(OUT_JIR, DBF_OUTLINK) {
         prompt("Jog Rev Increment Output Link (NC:JogIncrBwd:Goal)")
         promptgroup("50 - Output")
-        interest(1)
-    }
-    field(RBK_JIR, DBF_INLINK) {
-        prompt("Jog Rev Increment Readback Link (NC:JogIncrBwd:Goal_RBV)")
-        promptgroup("40 - Input")
         interest(1)
     }
     # RBK_JOGR intentionally omitted — bJogBwdCmd is a momentary pulse.
@@ -510,8 +471,18 @@ recordtype(tcmotor) {
         special(SPC_NOMOD)
         interest(3)
     }
-    field(BMOV, DBF_SHORT) {
-        prompt("Move Command Triggered Flag")
+    field(BVALP, DBF_SHORT) {
+        prompt("VAL Pending Move Flag")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(PDMOV, DBF_SHORT) {
+        prompt("Previous DMOV for edge detection")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(BINIT, DBF_SHORT) {
+        prompt("Initialization Complete Flag")
         special(SPC_NOMOD)
         interest(3)
     }
@@ -545,16 +516,6 @@ recordtype(tcmotor) {
         special(SPC_NOMOD)
         interest(3)
     }
-    field(LJIF, DBF_DOUBLE) {
-        prompt("Last Jog Fwd Increment Sent")
-        special(SPC_NOMOD)
-        interest(3)
-    }
-    field(LJIR, DBF_DOUBLE) {
-        prompt("Last Jog Rev Increment Sent")
-        special(SPC_NOMOD)
-        interest(3)
-    }
     # Last-posted values for monitor change detection — one per CA-visible field
     field(LDMOV, DBF_SHORT) { prompt("Last DMOV Posted") special(SPC_NOMOD) interest(3) }
     field(LMOVN, DBF_SHORT) { prompt("Last MOVN Posted") special(SPC_NOMOD) interest(3) }
@@ -563,15 +524,10 @@ recordtype(tcmotor) {
     field(LATHM, DBF_SHORT) { prompt("Last ATHM Posted") special(SPC_NOMOD) interest(3) }
     field(LTDIR, DBF_SHORT) { prompt("Last TDIR Posted") special(SPC_NOMOD) interest(3) }
     field(LSTOP, DBF_SHORT) { prompt("Last STOP Posted") special(SPC_NOMOD) interest(3) }
-    field(LSPMG, DBF_SHORT) { prompt("Last SPMG Posted") special(SPC_NOMOD) interest(3) }
-    field(LCNEN, DBF_SHORT) { prompt("Last CNEN Posted") special(SPC_NOMOD) interest(3) }
+    field(LSPMG, DBF_MENU) { prompt("Last SPMG Posted") special(SPC_NOMOD) interest(3) menu(tcmotorSPMG) }
     field(LLVIO, DBF_SHORT) { prompt("Last LVIO Posted") special(SPC_NOMOD) interest(3) }
     field(LJOGF, DBF_SHORT) { prompt("Last JOGF Posted") special(SPC_NOMOD) interest(3) }
     field(LJOGR, DBF_SHORT) { prompt("Last JOGR Posted") special(SPC_NOMOD) interest(3) }
     field(LMSTA, DBF_ULONG) { prompt("Last MSTA Posted") special(SPC_NOMOD) interest(3) }
-    field(LVELO, DBF_DOUBLE) { prompt("Last VELO Posted") special(SPC_NOMOD) interest(3) }
-    field(LACCS, DBF_DOUBLE) { prompt("Last ACCS Posted") special(SPC_NOMOD) interest(3) }
-    field(LHLM2, DBF_DOUBLE) { prompt("Last HLM Posted")  special(SPC_NOMOD) interest(3) }
-    field(LLLM2, DBF_DOUBLE) { prompt("Last LLM Posted")  special(SPC_NOMOD) interest(3) }
-    field(LBDST, DBF_DOUBLE) { prompt("Last BDST Posted") special(SPC_NOMOD) interest(3) }
 }
+
