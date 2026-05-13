@@ -53,11 +53,68 @@
 #include "recSup.h"
 #include "recGbl.h"
 #include "cantProceed.h"
+#include "callback.h"
 #include "epicsExport.h"
 
 #define GEN_SIZE_OFFSET
 #include "tcmotorRecord.h"
 #undef GEN_SIZE_OFFSET
+
+/* -------------------------------------------------------------------------
+ * Delayed initialization callback — reads output field initial values
+ * from PLC _RBV records after IDLY seconds (configurable per-instance).
+ * Single shot — no retry. Set IDLY in the db template to tune timing.
+ * ------------------------------------------------------------------------- */
+static void init_output_fields(tcmotorRecord *prec)
+{
+    epicsInt32 cnen_val = 0;
+    double rbk_val  = 0, rbk_velo = 0, rbk_accs = 0;
+    double rbk_hlm  = 0, rbk_llm  = 0, rbk_bdst = 0;
+
+    dbGetLink(&prec->rbk_val,  DBR_DOUBLE, &rbk_val,  NULL, NULL);
+    dbGetLink(&prec->rbk_velo, DBR_DOUBLE, &rbk_velo, NULL, NULL);
+    dbGetLink(&prec->rbk_accs, DBR_DOUBLE, &rbk_accs, NULL, NULL);
+    dbGetLink(&prec->rbk_cnen, DBR_ENUM,   &cnen_val, NULL, NULL);
+    dbGetLink(&prec->rbk_hlm,  DBR_DOUBLE, &rbk_hlm,  NULL, NULL);
+    dbGetLink(&prec->rbk_llm,  DBR_DOUBLE, &rbk_llm,  NULL, NULL);
+    dbGetLink(&prec->rbk_bdst, DBR_DOUBLE, &rbk_bdst, NULL, NULL);
+
+    dbScanLock((dbCommon *)prec);
+
+    prec->val  = rbk_val;   prec->lovl = rbk_val;
+    prec->velo = rbk_velo;  prec->lvel = rbk_velo;
+    prec->accs = rbk_accs;  prec->lacs = rbk_accs;
+    prec->cnen = (short)cnen_val; prec->lcne = prec->cnen;
+    prec->hlm  = rbk_hlm;   prec->lhlm = rbk_hlm;
+    prec->llm  = rbk_llm;   prec->lllm = rbk_llm;
+    prec->bdst = rbk_bdst;  prec->lbds = rbk_bdst;
+
+    errlogPrintf("tcmotor %s init: val=%.3f velo=%.3f accs=%.3f "
+                 "cnen=%d hlm=%.3f llm=%.3f bdst=%.3f\n",
+                 prec->name, prec->val, prec->velo, prec->accs,
+                 prec->cnen, prec->hlm, prec->llm, prec->bdst);
+
+    recGblGetTimeStamp(prec);
+    db_post_events(prec, &prec->val,  DBE_VALUE | DBE_LOG);
+    db_post_events(prec, &prec->velo, DBE_VALUE | DBE_LOG);
+    db_post_events(prec, &prec->accs, DBE_VALUE | DBE_LOG);
+    db_post_events(prec, &prec->cnen, DBE_VALUE | DBE_LOG);
+    db_post_events(prec, &prec->hlm,  DBE_VALUE | DBE_LOG);
+    db_post_events(prec, &prec->llm,  DBE_VALUE | DBE_LOG);
+    db_post_events(prec, &prec->bdst, DBE_VALUE | DBE_LOG);
+    prec->lval = prec->val;
+
+    dbScanUnlock((dbCommon *)prec);
+}
+
+static void init_callback(CALLBACK *pcb)
+{
+    tcmotorRecord *prec;
+    callbackGetUser(prec, pcb);
+    init_output_fields(prec);
+}
+
+
 
 /* -------------------------------------------------------------------------
  * SPMG state values — generated from menu(tcmotorSPMG) in tcmotorRecord.dbd
@@ -353,6 +410,17 @@ static long init_record(struct dbCommon *pcommon, int pass)
     compute_tdir(prec);
     compute_msta(prec);
 
+    /* Explicitly zero BINIT2 so autosave restore cannot skip the init block */
+    prec->binit2 = 0;
+
+    /* Schedule delayed callback to read output field initial values
+     * from PLC _RBV records after ADS has had time to connect. */
+    callbackSetCallback(init_callback, &prec->initcb);
+    callbackSetUser(prec, &prec->initcb);
+    callbackSetPriority(priorityMedium, &prec->initcb);
+    callbackRequestDelayed(&prec->initcb,
+                           prec->idly > 0.0 ? prec->idly : 30.0);
+
     /* Mark initialization complete */
     prec->binit = 1;
 
@@ -460,7 +528,8 @@ static long process(struct dbCommon *pcommon)
     #undef POST_IF_CHG_D
 
     recGblFwdLink(prec);
-    prec->pact = FALSE;
+    prec->udf   = 0;
+    prec->pact  = FALSE;
     return 0;
 }
 

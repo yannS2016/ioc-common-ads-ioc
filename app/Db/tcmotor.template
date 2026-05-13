@@ -4,7 +4,7 @@
 #
 # Macros:
 #   PREFIX   - PV prefix (e.g. TST:MOTION:)
-#   MOTOR    - Motor name (e.g. M1)
+#   M        - Motor name (e.g. M1)
 #   DESC     - Motor description
 #   EGU      - Engineering units (e.g. mm)
 #   PREC     - Display precision (e.g. 3)
@@ -21,6 +21,8 @@ record(tcmotor, "$(PREFIX)$(M)") {
     field(LOPR,  "$(LOPR=-100)")
     field(DRVH,  "$(DRVH=100)")
     field(DRVL,  "$(DRVL=-100)")
+    field(PINI,  "YES")
+    field(IDLY,  "$(IDLY=30)")
 
     # ------------------------------------------------------------------
     # Input links — status driven by PLC (CP: update on change)
@@ -34,8 +36,22 @@ record(tcmotor, "$(PREFIX)$(M)") {
     field(INP_NDIR, "$(PREFIX)$(M):bNegativeDirection_RBV CP")
     field(INP_PDIR, "$(PREFIX)$(M):bPositiveDirection_RBV CP")
     field(INP_ERR,  "$(PREFIX)$(M):bError_RBV CP")
-    #field(INP_HSEN, "$(PREFIX)$(M):bHomeSensor_RBV CP")
+    field(INP_HSEN, "$(PREFIX)$(M):bHomeSensorEnabled_RBV CP")
     field(INP_HMNG, "$(PREFIX)$(M):bHoming_RBV CP")
+
+    # ------------------------------------------------------------------
+    # Init readback links — CA links to _RBV records.
+    # Read once in process() on first PINI scan to seed output field
+    # initial values from the PLC. No CP so never trigger process()
+    # at runtime. After BINIT2 is set these are never read again.
+    # ------------------------------------------------------------------
+    field(RBK_VAL,  "$(PREFIX)$(M):fPosition_RBV")
+    field(RBK_VELO, "$(PREFIX)$(M):fVelocity_RBV")
+    field(RBK_ACCS, "$(PREFIX)$(M):fAcceleration_RBV")
+    field(RBK_CNEN, "$(PREFIX)$(M):bUserEnable_RBV")
+    field(RBK_HLM,  "$(PREFIX)$(M):NC:MaxPos:Goal_RBV")
+    field(RBK_LLM,  "$(PREFIX)$(M):NC:MinPos:Goal_RBV")
+    field(RBK_BDST, "$(PREFIX)$(M):NC:Backlash:Goal_RBV")
 
     # ------------------------------------------------------------------
     # Output links — forward operator writes to PLC (PP)
@@ -46,9 +62,9 @@ record(tcmotor, "$(PREFIX)$(M)") {
     field(OUT_HMOD, "$(PREFIX)$(M):eHomeMode PP")
     field(OUT_MCMD, "$(PREFIX)$(M):bMoveCmd PP")
     field(OUT_JOGF, "$(PREFIX)$(M):bJogFwdCmd PP")
-    #field(OUT_JIF,  "$(PREFIX)$(M):NC:JogIncrFwd:Goal PP")
+    field(OUT_JIF,  "$(PREFIX)$(M):NC:JogIncFwd:Goal PP")
     field(OUT_JOGR, "$(PREFIX)$(M):bJogBwdCmd PP")
-    #field(OUT_JIR,  "$(PREFIX)$(M):NC:JogIncrBwd:Goal PP")
+    field(OUT_JIR,  "$(PREFIX)$(M):NC:JogIncBwd:Goal PP")
     field(OUT_VELO, "$(PREFIX)$(M):fVelocity PP")
     field(OUT_ACCS, "$(PREFIX)$(M):fAcceleration PP")
     field(OUT_DECS, "$(PREFIX)$(M):fDeceleration PP")
@@ -58,11 +74,10 @@ record(tcmotor, "$(PREFIX)$(M)") {
     field(OUT_BDST, "$(PREFIX)$(M):NC:Backlash:Goal PP")
 
     # ------------------------------------------------------------------
-    # Output readback links — PLC-confirmed values (CP from _RBV PVs)
-    # ------------------------------------------------------------------
     # RBK_STOP intentionally omitted — bHalt is a pure output driven by
     # the SPMG state machine. Reading it back via CP would create a scan
     # loop: process writes bHalt -> bHalt_RBV changes -> CP triggers
     # process again -> writes bHalt again -> infinite loop.
     # The lsto cache in process_spmg prevents redundant writes instead.
+    # ------------------------------------------------------------------
 }

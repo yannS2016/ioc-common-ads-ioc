@@ -8,7 +8,8 @@
 # Link field naming convention:
 #   INP_*  — input link fields (CP links from PLC status PVs)
 #   OUT_*  — output link fields (PP links to PLC command PVs)
-#   RBK_*  — output readback links (CP from PLC _RBV counterparts)
+#   RBK_*  — init-only readback links (CA from PLC _RBV counterparts,
+#             read once at PINI to seed initial output field values)
 #
 # Computed fields (derived in process, not directly linked):
 #   TDIR   — computed from INP_NDIR + INP_PDIR
@@ -270,6 +271,16 @@ recordtype(tcmotor) {
         special(SPC_MOD)
         interest(1)
     }
+
+
+
+    field(RBK_VAL,  DBF_INLINK) { prompt("VAL init readback")  special(SPC_NOMOD) interest(3) }
+    field(RBK_VELO, DBF_INLINK) { prompt("VELO init readback") special(SPC_NOMOD) interest(3) }
+    field(RBK_ACCS, DBF_INLINK) { prompt("ACCS init readback") special(SPC_NOMOD) interest(3) }
+    field(RBK_CNEN, DBF_INLINK) { prompt("CNEN init readback") special(SPC_NOMOD) interest(3) }
+    field(RBK_HLM,  DBF_INLINK) { prompt("HLM init readback")  special(SPC_NOMOD) interest(3) }
+    field(RBK_LLM,  DBF_INLINK) { prompt("LLM init readback")  special(SPC_NOMOD) interest(3) }
+    field(RBK_BDST, DBF_INLINK) { prompt("BDST init readback") special(SPC_NOMOD) interest(3) }
     field(OUT_VAL, DBF_OUTLINK) {
         prompt("Position Output Link")
         promptgroup("50 - Output")
@@ -395,6 +406,7 @@ recordtype(tcmotor) {
         special(SPC_MOD)
         interest(1)
         menu(tcmotorSPMG)
+        initial("3")
     }
     field(OUT_MCMD, DBF_OUTLINK) {
         prompt("Move Command Output Link (bMoveCmd)")
@@ -486,6 +498,22 @@ recordtype(tcmotor) {
         special(SPC_NOMOD)
         interest(3)
     }
+    field(BINIT2, DBF_SHORT) {
+        prompt("Output Fields Initialized Flag")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(IDLY, DBF_DOUBLE) {
+        prompt("Init Delay (seconds)")
+        promptgroup("30 - Action")
+        interest(2)
+    }
+    field(INITCB, DBF_NOACCESS) {
+        prompt("Init Callback Structure")
+        special(SPC_NOMOD)
+        interest(4)
+        extra("CALLBACK initcb")
+    }
     field(LVEL, DBF_DOUBLE) {
         prompt("Last Velo Sent")
         special(SPC_NOMOD)
@@ -528,6 +556,7 @@ recordtype(tcmotor) {
     field(LLVIO, DBF_SHORT) { prompt("Last LVIO Posted") special(SPC_NOMOD) interest(3) }
     field(LJOGF, DBF_SHORT) { prompt("Last JOGF Posted") special(SPC_NOMOD) interest(3) }
     field(LJOGR, DBF_SHORT) { prompt("Last JOGR Posted") special(SPC_NOMOD) interest(3) }
+    field(LJIF,  DBF_DOUBLE) { prompt("Last Jog Fwd Incr Sent") special(SPC_NOMOD) interest(3) }
+    field(LJIR,  DBF_DOUBLE) { prompt("Last Jog Rev Incr Sent") special(SPC_NOMOD) interest(3) }
     field(LMSTA, DBF_ULONG) { prompt("Last MSTA Posted") special(SPC_NOMOD) interest(3) }
 }
-
