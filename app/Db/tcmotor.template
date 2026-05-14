@@ -22,12 +22,13 @@ record(tcmotor, "$(PREFIX)$(M)") {
     field(DRVH,  "$(DRVH=100)")
     field(DRVL,  "$(DRVL=-100)")
     field(PINI,  "YES")
-    field(IDLY,  "$(IDLY=30)")
+    field(IDLY,  "$(IDLY=5)")
 
     # ------------------------------------------------------------------
     # Input links — status driven by PLC (CP: update on change)
     # ------------------------------------------------------------------
     field(INP_RBV,  "$(PREFIX)$(M):fActPosition_RBV CP")
+    field(INP_EGU,  "$(PREFIX)$(M):NC:Eu:Val_RBV CP")
     field(INP_DMOV, "$(PREFIX)$(M):bDone_RBV CP")
     field(INP_MOVN, "$(PREFIX)$(M):bMoving_RBV CP")
     field(INP_HLS,  "$(PREFIX)$(M):bForwardEnabled_RBV CP")
@@ -47,6 +48,8 @@ record(tcmotor, "$(PREFIX)$(M)") {
     # ------------------------------------------------------------------
     field(RBK_VAL,  "$(PREFIX)$(M):fPosition_RBV")
     field(RBK_VELO, "$(PREFIX)$(M):fVelocity_RBV")
+    field(RBK_VBAS, "$(PREFIX)$(M):NC:RefVel:Goal_RBV")
+    field(RBK_VMAX, "$(PREFIX)$(M):NC:MaxVel:Goal_RBV")
     field(RBK_ACCS, "$(PREFIX)$(M):fAcceleration_RBV")
     field(RBK_CNEN, "$(PREFIX)$(M):bUserEnable_RBV")
     field(RBK_HLM,  "$(PREFIX)$(M):NC:MaxPos:Goal_RBV")
@@ -66,6 +69,8 @@ record(tcmotor, "$(PREFIX)$(M)") {
     field(OUT_JOGR, "$(PREFIX)$(M):bJogBwdCmd PP")
     field(OUT_JIR,  "$(PREFIX)$(M):NC:JogIncBwd:Goal PP")
     field(OUT_VELO, "$(PREFIX)$(M):fVelocity PP")
+    field(OUT_VBAS, "$(PREFIX)$(M):NC:RefVel:Goal PP")
+    field(OUT_VMAX, "$(PREFIX)$(M):NC:MaxVel:Goal PP")
     field(OUT_ACCS, "$(PREFIX)$(M):fAcceleration PP")
     field(OUT_DECS, "$(PREFIX)$(M):fDeceleration PP")
     field(OUT_CNEN, "$(PREFIX)$(M):bUserEnable PP")

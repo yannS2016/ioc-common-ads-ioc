@@ -32,12 +32,19 @@ recordtype(tcmotor) {
     include "dbCommon.dbd"
 
     # -----------------------------------------------------------------------
-    # Display / engineering fields (local, no links)
+    # Display / engineering fields
+    #
+    # EGU and PREC are NOT provided by dbCommon.dbd — that file contains only
+    # NAME, DESC, ASG, SCAN, PINI, PHAS, EVNT, TSE, TSEL, DTYP, DISV, DISA,
+    # SDIS, MLOK, MLIS, BKLNK, DISP, PROC, STAT, SEVR, AMSG, NSTA, NSEV,
+    # NAMSG, ACKS, ACKT, DISS, LCNT, PACT, PUTF, RPRO, ASP, PPN, PPNR, SPVT,
+    # RSET, DSET, DPVT, RDES, LSET, PRIO, TPRO, BKPT, UDF, UDFS, TIME, UTAG,
+    # FLNK. Record types that want EGU/PREC must define them in their own
+    # recordtype block — see aiRecord.dbd, motorRecord.dbd for precedent.
     # -----------------------------------------------------------------------
     field(EGU, DBF_STRING) {
         prompt("Engineering Units")
         promptgroup("80 - Display")
-        special(SPC_MOD)
         interest(1)
         size(16)
     }
@@ -79,6 +86,12 @@ recordtype(tcmotor) {
     field(RBV, DBF_DOUBLE) {
         prompt("Readback Value")
         special(SPC_NOMOD)
+        interest(1)
+    }
+
+    field(INP_EGU, DBF_INLINK) {
+        prompt("EGU Input Link (NC:Eu:Val)")
+        promptgroup("40 - Input")
         interest(1)
     }
 
@@ -276,6 +289,8 @@ recordtype(tcmotor) {
 
     field(RBK_VAL,  DBF_INLINK) { prompt("VAL init readback")  special(SPC_NOMOD) interest(3) }
     field(RBK_VELO, DBF_INLINK) { prompt("VELO init readback") special(SPC_NOMOD) interest(3) }
+    field(RBK_VBAS, DBF_INLINK) { prompt("VBAS init readback") special(SPC_NOMOD) interest(3) }
+    field(RBK_VMAX, DBF_INLINK) { prompt("VMAX init readback") special(SPC_NOMOD) interest(3) }
     field(RBK_ACCS, DBF_INLINK) { prompt("ACCS init readback") special(SPC_NOMOD) interest(3) }
     field(RBK_CNEN, DBF_INLINK) { prompt("CNEN init readback") special(SPC_NOMOD) interest(3) }
     field(RBK_HLM,  DBF_INLINK) { prompt("HLM init readback")  special(SPC_NOMOD) interest(3) }
@@ -344,6 +359,32 @@ recordtype(tcmotor) {
     }
     field(OUT_VELO, DBF_OUTLINK) {
         prompt("Velocity Output Link")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+
+    field(VBAS, DBF_DOUBLE) {
+        prompt("Base Velocity (EGU/s)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(OUT_VBAS, DBF_OUTLINK) {
+        prompt("Base Velocity Output Link (fVelocityBase)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+
+    field(VMAX, DBF_DOUBLE) {
+        prompt("Max Velocity (EGU/s)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(OUT_VMAX, DBF_OUTLINK) {
+        prompt("Max Velocity Output Link (fVelocityMax)")
         promptgroup("50 - Output")
         interest(1)
     }
@@ -516,6 +557,16 @@ recordtype(tcmotor) {
     }
     field(LVEL, DBF_DOUBLE) {
         prompt("Last Velo Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LVBS, DBF_DOUBLE) {
+        prompt("Last Base Velo Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LVMX, DBF_DOUBLE) {
+        prompt("Last Max Velo Sent")
         special(SPC_NOMOD)
         interest(3)
     }

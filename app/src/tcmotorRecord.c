@@ -47,6 +47,7 @@
 #include "dbDefs.h"
 #include "dbEvent.h"
 #include "dbAccess.h"
+#include "dbCommon.h"
 #include "dbFldTypes.h"
 #include "errMdef.h"
 #include "errlog.h"
@@ -79,6 +80,11 @@ static void init_output_fields(tcmotorRecord *prec)
     dbGetLink(&prec->rbk_llm,  DBR_DOUBLE, &rbk_llm,  NULL, NULL);
     dbGetLink(&prec->rbk_bdst, DBR_DOUBLE, &rbk_bdst, NULL, NULL);
 
+    /* VBAS and VMAX — base and max velocity from PLC */
+    double rbk_vbas = 0, rbk_vmax = 0;
+    dbGetLink(&prec->rbk_vbas, DBR_DOUBLE, &rbk_vbas, NULL, NULL);
+    dbGetLink(&prec->rbk_vmax, DBR_DOUBLE, &rbk_vmax, NULL, NULL);
+
     dbScanLock((dbCommon *)prec);
 
     prec->val  = rbk_val;   prec->lovl = rbk_val;
@@ -88,15 +94,19 @@ static void init_output_fields(tcmotorRecord *prec)
     prec->hlm  = rbk_hlm;   prec->lhlm = rbk_hlm;
     prec->llm  = rbk_llm;   prec->lllm = rbk_llm;
     prec->bdst = rbk_bdst;  prec->lbds = rbk_bdst;
+    prec->vbas = rbk_vbas;  prec->lvbs = rbk_vbas;
+    prec->vmax = rbk_vmax;  prec->lvmx = rbk_vmax;
 
-    errlogPrintf("tcmotor %s init: val=%.3f velo=%.3f accs=%.3f "
-                 "cnen=%d hlm=%.3f llm=%.3f bdst=%.3f\n",
-                 prec->name, prec->val, prec->velo, prec->accs,
-                 prec->cnen, prec->hlm, prec->llm, prec->bdst);
+    errlogPrintf("tcmotor %s init: val=%.3f velo=%.3f vbas=%.3f vmax=%.3f "
+                 "accs=%.3f cnen=%d hlm=%.3f llm=%.3f bdst=%.3f\n",
+                 prec->name, prec->val, prec->velo, prec->vbas, prec->vmax,
+                 prec->accs, prec->cnen, prec->hlm, prec->llm, prec->bdst);
 
     recGblGetTimeStamp(prec);
     db_post_events(prec, &prec->val,  DBE_VALUE | DBE_LOG);
     db_post_events(prec, &prec->velo, DBE_VALUE | DBE_LOG);
+    db_post_events(prec, &prec->vbas, DBE_VALUE | DBE_LOG);
+    db_post_events(prec, &prec->vmax, DBE_VALUE | DBE_LOG);
     db_post_events(prec, &prec->accs, DBE_VALUE | DBE_LOG);
     db_post_events(prec, &prec->cnen, DBE_VALUE | DBE_LOG);
     db_post_events(prec, &prec->hlm,  DBE_VALUE | DBE_LOG);
@@ -377,8 +387,6 @@ static void process_spmg(tcmotorRecord *prec)
 
 /* -------------------------------------------------------------------------
  * init_record
-/* -------------------------------------------------------------------------
- * init_record
  *
  * Pass 0: nothing to do -- links not yet resolved
  * Pass 1: read all input and readback links for initial values,
@@ -389,8 +397,9 @@ static long init_record(struct dbCommon *pcommon, int pass)
     tcmotorRecord *prec = (tcmotorRecord *)pcommon;
     double v;
 
-    if (pass == 0)
+    if (pass == 0) {
         return 0;
+    }
 
     /* Read pure input links */
     read_input(prec, &prec->inp_rbv,  &prec->rbv);
@@ -441,27 +450,67 @@ static long process(struct dbCommon *pcommon)
 
     prec->pact = TRUE;
 
+    /* Guard: if process() fires before init_record pass 1 completes
+     * (via CP link from a source record), skip all processing. */
+    if (!prec->binit) {
+        prec->pact = FALSE;
+        return 0;
+    }
+
     /* ------------------------------------------------------------------
      * Read all pure input links
      * ------------------------------------------------------------------ */
     read_input(prec, &prec->inp_rbv,  &prec->rbv);
 
     v = prec->dmov; read_input(prec, &prec->inp_dmov, &v); prec->dmov = (short)v;
+
     v = prec->movn; read_input(prec, &prec->inp_movn, &v); prec->movn = (short)v;
+
     v = prec->hls;  read_input(prec, &prec->inp_hls,  &v); prec->hls  = (short)v;
+
     v = prec->lls;  read_input(prec, &prec->inp_lls,  &v); prec->lls  = (short)v;
+
     v = prec->athm; read_input(prec, &prec->inp_athm, &v); prec->athm = (short)v;
+
     v = prec->ndir; read_input(prec, &prec->inp_ndir, &v); prec->ndir = (short)v;
+
     v = prec->pdir; read_input(prec, &prec->inp_pdir, &v); prec->pdir = (short)v;
+
     v = prec->lerr; read_input(prec, &prec->inp_err,  &v); prec->lerr = (short)v;
+
     v = prec->hsen; read_input(prec, &prec->inp_hsen, &v); prec->hsen = (short)v;
+
     v = prec->hmng; read_input(prec, &prec->inp_hmng, &v); prec->hmng = (short)v;
+
+    /* Read EGU from NC:Eu:Val_RBV — char waveform, read as string.
+     * Buffer is sized to prec->egu so a wider PV is truncated, not overrun. */
+    if (prec->inp_egu.type != CONSTANT) {
+        char egu_buf[sizeof(prec->egu)] = {0};
+        long egu_n = sizeof(egu_buf) - 1;
+        if (!dbGetLink(&prec->inp_egu, DBR_CHAR, egu_buf, NULL, &egu_n)) {
+            egu_buf[sizeof(egu_buf) - 1] = '\0';
+            if (strncmp(prec->egu, egu_buf, sizeof(prec->egu)) != 0) {
+                strncpy(prec->egu, egu_buf, sizeof(prec->egu) - 1);
+                prec->egu[sizeof(prec->egu) - 1] = '\0';
+                db_post_events(prec, &prec->egu, DBE_VALUE | DBE_LOG);
+            }
+        }
+    }
 
     /* ------------------------------------------------------------------
      * Compute derived fields
      * ------------------------------------------------------------------ */
     compute_tdir(prec);
     compute_msta(prec);
+
+    /* Set record severity based on axis state:
+     * - Limit hit (HLS=0 or LLS=0) -> MAJOR alarm
+     * - PLC error (LERR=1)         -> MAJOR alarm
+     * - Moving normally             -> NO_ALARM */
+    if (!prec->hls || !prec->lls)
+        recGblSetSevr(prec, STATE_ALARM, MAJOR_ALARM);
+    else if (prec->lerr)
+        recGblSetSevr(prec, STATE_ALARM, MAJOR_ALARM);
 
     /* ------------------------------------------------------------------
      * SPMG state machine — handle DMOV rising edge for MOVE→PAUSE revert.
@@ -604,6 +653,18 @@ static long special(DBADDR *paddr, int after)
             prec->lacs = prec->accs;
         }
 
+    } else if (paddr->pfield == (void *)&prec->vbas) {
+        recGblGetTimeStamp(prec);
+        db_post_events(prec, &prec->vbas, DBE_VALUE | DBE_LOG);
+        prec->lvbs = prec->vbas;
+        write_output(prec, &prec->out_vbas, prec->vbas);
+
+    } else if (paddr->pfield == (void *)&prec->vmax) {
+        recGblGetTimeStamp(prec);
+        db_post_events(prec, &prec->vmax, DBE_VALUE | DBE_LOG);
+        prec->lvmx = prec->vmax;
+        write_output(prec, &prec->out_vmax, prec->vmax);
+
     } else if (paddr->pfield == (void *)&prec->cnen) {
         write_output_short(prec, &prec->out_cnen, prec->cnen);
         prec->lcne = prec->cnen;
@@ -645,6 +706,9 @@ static long special(DBADDR *paddr, int after)
             write_output_short(prec, &prec->out_stop, 1);
             prec->lsto = 1;
             prec->spmg = SPMG_STOP;
+            /* STOP is a momentary command — clear after sending */
+            prec->stop = 0;
+            db_post_events(prec, &prec->stop, DBE_VALUE | DBE_LOG);
         } else {
             prec->spmg = SPMG_GO;
             write_output_short(prec, &prec->out_stop, 0);
@@ -702,9 +766,9 @@ static long special(DBADDR *paddr, int after)
          * No action on falling edge (PLC already cleared the command).
          */
         if (prec->jogf) {
-            if (prec->val != prec->lvel) {
+            if (prec->val != prec->ljif) {
                 write_output(prec, &prec->out_jif, prec->val);
-                prec->lvel = prec->val;
+                prec->ljif = prec->val;
             }
             write_output_short(prec, &prec->out_jogf, 1);
         }
@@ -717,9 +781,9 @@ static long special(DBADDR *paddr, int after)
          * No action on falling edge (PLC already cleared the command).
          */
         if (prec->jogr) {
-            if (prec->val != prec->lacs) {
+            if (prec->val != prec->ljir) {
                 write_output(prec, &prec->out_jir, prec->val);
-                prec->lacs = prec->val;
+                prec->ljir = prec->val;
             }
             write_output_short(prec, &prec->out_jogr, 1);
         }
@@ -734,6 +798,56 @@ static long special(DBADDR *paddr, int after)
  * ------------------------------------------------------------------------- */
 static long cvt_dbaddr(DBADDR *paddr)
 {
+    tcmotorRecord *prec = (tcmotorRecord *)paddr->precord;
+
+    /* DBF_STRING fields need explicit type/size so CA sends them as strings.
+     * field_size must match the dbd-declared size, not MAX_STRING_SIZE. */
+    if (paddr->pfield == (void *)&prec->egu) {
+        paddr->field_type     = DBF_STRING;
+        paddr->field_size     = sizeof(prec->egu);
+        paddr->dbr_field_type = DBR_STRING;
+    }
+    /* SHORT/MENU fields */
+    else if (paddr->pfield == (void *)&prec->dmov ||
+             paddr->pfield == (void *)&prec->movn ||
+             paddr->pfield == (void *)&prec->hls  ||
+             paddr->pfield == (void *)&prec->lls  ||
+             paddr->pfield == (void *)&prec->athm ||
+             paddr->pfield == (void *)&prec->tdir ||
+             paddr->pfield == (void *)&prec->lerr ||
+             paddr->pfield == (void *)&prec->hsen ||
+             paddr->pfield == (void *)&prec->hmng ||
+             paddr->pfield == (void *)&prec->ndir ||
+             paddr->pfield == (void *)&prec->pdir ||
+             paddr->pfield == (void *)&prec->lvio ||
+             paddr->pfield == (void *)&prec->cnen ||
+             paddr->pfield == (void *)&prec->stop ||
+             paddr->pfield == (void *)&prec->homf ||
+             paddr->pfield == (void *)&prec->homr ||
+             paddr->pfield == (void *)&prec->jogf ||
+             paddr->pfield == (void *)&prec->jogr) {
+        paddr->field_type     = DBF_SHORT;
+        paddr->field_size     = sizeof(epicsInt16);
+        paddr->dbr_field_type = DBR_SHORT;
+    }
+    /* MENU field (SPMG) */
+    else if (paddr->pfield == (void *)&prec->spmg) {
+        paddr->field_type     = DBF_ENUM;
+        paddr->field_size     = sizeof(epicsEnum16);
+        paddr->dbr_field_type = DBR_ENUM;
+    }
+    /* ULONG field (MSTA) */
+    else if (paddr->pfield == (void *)&prec->msta) {
+        paddr->field_type     = DBF_ULONG;
+        paddr->field_size     = sizeof(epicsUInt32);
+        paddr->dbr_field_type = DBR_LONG;
+    }
+    /* DOUBLE fields — default */
+    else {
+        paddr->field_type     = DBF_DOUBLE;
+        paddr->field_size     = sizeof(epicsFloat64);
+        paddr->dbr_field_type = DBR_DOUBLE;
+    }
     paddr->no_elements = 1;
     return 0;
 }
@@ -751,13 +865,50 @@ static long get_array_info(DBADDR *paddr, long *no_elements, long *offset)
 static long get_units(DBADDR *paddr, char *units)
 {
     tcmotorRecord *prec = (tcmotorRecord *)paddr->precord;
-    strncpy(units, prec->egu, DB_UNITS_SIZE);
+
+    if (paddr->pfield == (void *)&prec->val  ||
+        paddr->pfield == (void *)&prec->rbv  ||
+        paddr->pfield == (void *)&prec->hlm  ||
+        paddr->pfield == (void *)&prec->llm  ||
+        paddr->pfield == (void *)&prec->bdst) {
+        strncpy(units, prec->egu, DB_UNITS_SIZE);
+    } else if (paddr->pfield == (void *)&prec->velo ||
+               paddr->pfield == (void *)&prec->vbas ||
+               paddr->pfield == (void *)&prec->vmax) {
+        snprintf(units, DB_UNITS_SIZE, "%s/s", prec->egu);
+    } else if (paddr->pfield == (void *)&prec->accs) {
+        snprintf(units, DB_UNITS_SIZE, "%s/s^2", prec->egu);
+    } else {
+        units[0] = '\0';
+    }
     return 0;
 }
 
 static long get_precision(const DBADDR *paddr, long *precision)
 {
     tcmotorRecord *prec = (tcmotorRecord *)paddr->precord;
+
+    /* For position/velocity/limit fields, use the record's PREC field directly.
+     * For everything else, defer to recGblGetPrec to pick a sensible default.
+     * Note: recGblGetPrec overwrites *precision unconditionally, so we must
+     * return early for the value-like fields rather than fall through. */
+    if (paddr->pfield == (void *)&prec->val  ||
+        paddr->pfield == (void *)&prec->rbv  ||
+        paddr->pfield == (void *)&prec->hlm  ||
+        paddr->pfield == (void *)&prec->llm  ||
+        paddr->pfield == (void *)&prec->drvh ||
+        paddr->pfield == (void *)&prec->drvl ||
+        paddr->pfield == (void *)&prec->hopr ||
+        paddr->pfield == (void *)&prec->lopr ||
+        paddr->pfield == (void *)&prec->velo ||
+        paddr->pfield == (void *)&prec->vbas ||
+        paddr->pfield == (void *)&prec->vmax ||
+        paddr->pfield == (void *)&prec->accs ||
+        paddr->pfield == (void *)&prec->bdst) {
+        *precision = prec->prec;
+        return 0;
+    }
+
     *precision = prec->prec;
     recGblGetPrec(paddr, precision);
     return 0;
@@ -781,9 +932,21 @@ static long get_control_double(DBADDR *paddr, struct dbr_ctrlDouble *pcd)
 
 static long get_alarm_double(DBADDR *paddr, struct dbr_alDouble *pad)
 {
-    pad->upper_alarm_limit   = 0.0;
-    pad->upper_warning_limit = 0.0;
-    pad->lower_warning_limit = 0.0;
-    pad->lower_alarm_limit   = 0.0;
+    tcmotorRecord *prec = (tcmotorRecord *)paddr->precord;
+
+    /* Limit switches are active-low: 0 = limit hit (alarm), 1 = clear.
+     * Set alarm thresholds so Typhos shows orange only when value = 0. */
+    if (paddr->pfield == (void *)&prec->hls ||
+        paddr->pfield == (void *)&prec->lls) {
+        pad->upper_alarm_limit   = 0.0;
+        pad->upper_warning_limit = 0.0;
+        pad->lower_warning_limit = 0.5;
+        pad->lower_alarm_limit   = 0.5;
+    } else {
+        pad->upper_alarm_limit   = 0.0;
+        pad->upper_warning_limit = 0.0;
+        pad->lower_warning_limit = 0.0;
+        pad->lower_alarm_limit   = 0.0;
+    }
     return 0;
 }
