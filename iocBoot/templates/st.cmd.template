@@ -188,9 +188,8 @@ dbLoadRecords("EthercatMCreadback.template", "PREFIX=$(MOTOR_PREFIX), MOTOR_NAME
 dbLoadRecords("EthercatMCdebug.template", "PREFIX=$(MOTOR_PREFIX), MOTOR_NAME=$(MOTOR_NAME), MOTOR_PORT=$(MOTOR_PORT), AXIS_NO=$(AXIS_NO), PREC=3")
 
 {% else %}
-# ---- StreamDevice Motor Axis Records (FB_MotionStage) ----
-# Loads the StreamDevice-based records for this FB_MotionStage axis.
-dbLoadRecords("motor.template", "PORT=$(ASYN_PORT), ADSPORT=$(AMS_PORT), ADSPATH=$(MOTOR_ADS_PATH), PREFIX=$(MOTOR_PREFIX), M=$(MOTOR_NAME), EGU=$(EGU), PREC=$(PREC)")
+# (FB_MotionStageNC: stream bulk and MR uniformity orchestration)
+dbLoadRecords("tcmotor.template", "PORT=$(ASYN_PORT), ADSPORT=$(AMS_PORT), ADSPATH=$(MOTOR_ADS_PATH), PREFIX=$(MOTOR_PREFIX), M=$(MOTOR_NAME), EGU=$(EGU), PREC=$(PREC)")
 
 {% endif %}
 {% endfor %}

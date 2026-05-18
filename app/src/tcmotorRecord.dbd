@@ -190,16 +190,36 @@ recordtype(tcmotor) {
         interest(2)
     }
 
-    # Home sensor — used for MSTA computation
-    field(INP_HSEN, DBF_INLINK) {
-        prompt("Home Sensor Input Link")
+    # Homed status — latched flag indicating the axis has been homed since
+    # power-on. Distinct from ATHM (instantaneous home-switch state).
+    # Wired from the PLC's bHomed flag.
+    field(INP_HOMED, DBF_INLINK) {
+        prompt("Homed Status Input Link")
         promptgroup("40 - Input")
         interest(1)
     }
-    field(HSEN, DBF_SHORT) {
-        prompt("Home Sensor Active")
+    field(HOMED, DBF_SHORT) {
+        prompt("Axis Homed (latched)")
         special(SPC_NOMOD)
         interest(2)
+    }
+
+    # Configured home position (EGU) — mirrored from NC axis parameter
+    # fHomePosition_RBV. Read-only at the EPICS layer; operators set it
+    # via the PLC NC config, not here. Used together with HOMED and RBV
+    # to compute MSTA bit 7 (HOME = "axis is at home position"):
+    #   HOME = HOMED && |RBV - HPOS| < tolerance
+    # where tolerance is derived from PREC (half the least-significant
+    # digit) so the check auto-scales with display precision.
+    field(INP_HPOS, DBF_INLINK) {
+        prompt("Home Position Input Link (fHomePosition_RBV)")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(HPOS, DBF_DOUBLE) {
+        prompt("Home Position (EGU)")
+        special(SPC_NOMOD)
+        interest(1)
     }
 
     # Homing in progress — used for MSTA computation
@@ -214,20 +234,59 @@ recordtype(tcmotor) {
         interest(2)
     }
 
+    # -----------------------------------------------------------------------
+    # Alarm severity menus — selectable per record instance, matching the
+    # motor record convention. Defaults are MAJOR; templates may override.
+    # Severities raised via recGblSetSevr in process(), with priority
+    # determined by recGblSetSevr's own "highest wins" semantics.
+    # -----------------------------------------------------------------------
+    field(HLSV, DBF_MENU) {
+        prompt("High Limit Switch Severity")
+        promptgroup("70 - Alarm")
+        interest(1)
+        initial("MAJOR")
+        menu(menuAlarmSevr)
+    }
+    field(LLSV, DBF_MENU) {
+        prompt("Low Limit Switch Severity")
+        promptgroup("70 - Alarm")
+        interest(1)
+        initial("MAJOR")
+        menu(menuAlarmSevr)
+    }
+    field(LSV, DBF_MENU) {
+        prompt("Limit Violation Severity")
+        promptgroup("70 - Alarm")
+        interest(1)
+        initial("MAJOR")
+        menu(menuAlarmSevr)
+    }
+
     # Motor Status Word — computed from all status bools each cycle.
-    # Bit layout follows motor record MSTA convention:
-    #   bit 0  (0x0001) direction        NDIR
-    #   bit 1  (0x0002) done             DMOV
-    #   bit 2  (0x0004) plus limit       HLS
-    #   bit 3  (0x0008) home switch      HSEN
-    #   bit 5  (0x0020) minus limit      LLS
-    #   bit 6  (0x0040) homed            ATHM
-    #   bit 7  (0x0080) present          always 1
-    #   bit 8  (0x0100) problem          LERR
-    #   bit 9  (0x0200) moving           MOVN
-    #   bit 11 (0x0800) comm error       link alarm
-    #   bit 12 (0x1000) at home          ATHM
-    #   bit 15 (0x8000) homing           HMNG
+    # Canonical motor record MSTA layout (see motor.h in epics-modules/motor).
+    # Bits that have no tcmotor source (POSITION, SLIP_STALL, GAIN_SUPPORT)
+    # retain their canonical positions and stay zero, so future Typhos
+    # label tables line up regardless of which bits a given record sets.
+    # Note that limit switches are active-low at the EPICS layer (HLS/LLS=0
+    # means "limit hit") whereas MSTA bits are active-high (bit set means
+    # "limit hit"), so compute_msta() inverts them.
+    #
+    #   bit  0  (0x0001) DIRECTION       TDIR     (1=positive)
+    #   bit  1  (0x0002) DONE            DMOV
+    #   bit  2  (0x0004) PLUS_LS         !HLS     (inverted)
+    #   bit  3  (0x0008) HOMLS           ATHM     (home switch state)
+    #   bit  4  (0x0010) -               unused
+    #   bit  5  (0x0020) POSITION        unused   (closed-loop, no PLC source)
+    #   bit  6  (0x0040) SLIP_STALL      unused   (PLC handles via LERR)
+    #   bit  7  (0x0080) HOME            HOMED + RBV near HPOS  (at home position)
+    #   bit  8  (0x0100) PRESENT         always 1
+    #   bit  9  (0x0200) PROBLEM         LERR
+    #   bit 10  (0x0400) MOVING          MOVN
+    #   bit 11  (0x0800) GAIN_SUPPORT    unused
+    #   bit 12  (0x1000) COMM_ERR        link alarm (one cycle lag)
+    #   bit 13  (0x2000) MINUS_LS        !LLS     (inverted)
+    #   bit 14  (0x4000) HOMED           HOMED    (latched, from PLC bHomed)
+    #   bit 15  (0x8000) HOMING          HMNG     (tcmotor extension)
     field(MSTA, DBF_ULONG) {
         prompt("Motor Status Word")
         special(SPC_NOMOD)
@@ -285,7 +344,57 @@ recordtype(tcmotor) {
         interest(1)
     }
 
+    # User Offset (EGU) — bidirectionally mirrored with the NC axis offset.
+    # The PLC owns the value; OFF is the EPICS-side reflection of it.
+    # - INP_OFF: CP from NC:PosBias_RBV, updates OFF every cycle so changes
+    #   made via TwinCAT (or any other ADS client) are visible at the EPICS
+    #   layer within one scan.
+    # - OUT_OFF: PP to NC:PosBias, pushed by special() when OFF is CA-written.
+    # - RBK_OFF: plain DB_LINK, read once by init_callback to seed OFF before
+    #   the first CP update arrives.
+    # The LOFF last-sent cache is updated both on CA writes (in special()) and
+    # on CP reads (in process() after read_input) to prevent write-loops:
+    # changes that arrived from the PLC must not be echoed back.
+    field(OFF, DBF_DOUBLE) {
+        prompt("User Offset (EGU)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(INP_OFF, DBF_INLINK) {
+        prompt("User Offset Input Link (NC:PosBias_RBV)")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(OUT_OFF, DBF_OUTLINK) {
+        prompt("User Offset Output Link (NC:PosBias)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
 
+    # -----------------------------------------------------------------------
+    # Continuous-read input links for bidirectional fields.
+    # Used for fields where the PLC may legitimately be a source of writes
+    # (commissioning-class settings like soft limits and user offset).
+    # The L* cache prevents write-loops; see SYNC_FROM_PLC_* in
+    # tcmotorRecord.c for the mechanism. Motion-parameter fields (VELO,
+    # ACCS, VBAS, VMAX, BDST, CNEN) are deliberately NOT mirrored this way
+    # — they are EPICS-owned per motor record convention, seeded once from
+    # the PLC at init via RBK_*, and written from CA thereafter.
+    # PV names below are placeholders; resolve to actual NC PVs in the
+    # template.
+    # -----------------------------------------------------------------------
+    field(INP_HLM, DBF_INLINK) {
+        prompt("High Soft Limit Input Link (NC:MaxPos:Val_RBV)")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(INP_LLM, DBF_INLINK) {
+        prompt("Low Soft Limit Input Link (NC:MinPos:Val_RBV)")
+        promptgroup("40 - Input")
+        interest(1)
+    }
 
     field(RBK_VAL,  DBF_INLINK) { prompt("VAL init readback")  special(SPC_NOMOD) interest(3) }
     field(RBK_VELO, DBF_INLINK) { prompt("VELO init readback") special(SPC_NOMOD) interest(3) }
@@ -296,6 +405,7 @@ recordtype(tcmotor) {
     field(RBK_HLM,  DBF_INLINK) { prompt("HLM init readback")  special(SPC_NOMOD) interest(3) }
     field(RBK_LLM,  DBF_INLINK) { prompt("LLM init readback")  special(SPC_NOMOD) interest(3) }
     field(RBK_BDST, DBF_INLINK) { prompt("BDST init readback") special(SPC_NOMOD) interest(3) }
+    field(RBK_OFF,  DBF_INLINK) { prompt("OFF init readback")  special(SPC_NOMOD) interest(3) }
     field(OUT_VAL, DBF_OUTLINK) {
         prompt("Position Output Link")
         promptgroup("50 - Output")
@@ -595,12 +705,19 @@ recordtype(tcmotor) {
         special(SPC_NOMOD)
         interest(3)
     }
+    field(LOFF, DBF_DOUBLE) {
+        prompt("Last User Offset Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
     # Last-posted values for monitor change detection — one per CA-visible field
     field(LDMOV, DBF_SHORT) { prompt("Last DMOV Posted") special(SPC_NOMOD) interest(3) }
     field(LMOVN, DBF_SHORT) { prompt("Last MOVN Posted") special(SPC_NOMOD) interest(3) }
     field(LHLS,  DBF_SHORT) { prompt("Last HLS Posted")  special(SPC_NOMOD) interest(3) }
     field(LLLS,  DBF_SHORT) { prompt("Last LLS Posted")  special(SPC_NOMOD) interest(3) }
     field(LATHM, DBF_SHORT) { prompt("Last ATHM Posted") special(SPC_NOMOD) interest(3) }
+    field(LHOM,  DBF_SHORT) { prompt("Last HOMED Posted") special(SPC_NOMOD) interest(3) }
+    field(LHPOS, DBF_DOUBLE) { prompt("Last HPOS Posted") special(SPC_NOMOD) interest(3) }
     field(LTDIR, DBF_SHORT) { prompt("Last TDIR Posted") special(SPC_NOMOD) interest(3) }
     field(LSTOP, DBF_SHORT) { prompt("Last STOP Posted") special(SPC_NOMOD) interest(3) }
     field(LSPMG, DBF_MENU) { prompt("Last SPMG Posted") special(SPC_NOMOD) interest(3) menu(tcmotorSPMG) }
