@@ -17,6 +17,7 @@ adsIoc_DBD += base.dbd
 adsIoc_DBD += iocAdmin.dbd
 adsIoc_DBD += asSupport.dbd
 adsIoc_DBD += ads.dbd
+adsIoc_DBD += stream.dbd
 adsIoc_DBD += asyn.dbd
 adsIoc_DBD += drvAsynIPPort.dbd
 adsIoc_DBD += dbArchive.dbd
@@ -47,6 +48,17 @@ ifneq (,$(findstring /,$(MOTOR)))
   adsIoc_LIBS += EthercatMcSupport
 endif
 
+ifdef PCRE
+LIB_LIBS += pcre
+else
+ifneq ($(words $(PCRE_LIB) $(PCRE_INCLUDE)),0)
+PROD_SYS_LIBS_DEFAULT += pcre
+PROD_SYS_LIBS_WIN32 += $(PCRE_LIB)\\pcre
+SHRLIB_DEPLIB_DIRS += $(PCRE_LIB)
+USR_LDFLAGS+=-L$(PCRE_LIB)
+endif
+endif
+
 # adsIoc_registerRecordDeviceDriver.cpp will be created from adsIoc.dbd
 adsIoc_SRCS += adsIoc_registerRecordDeviceDriver.cpp
 adsIoc_SRCS += infoFieldArchive.c
@@ -55,6 +67,7 @@ adsIoc_SRCS_DEFAULT += adsIocMain.cpp
 adsIoc_LIBS += devIocStats
 adsIoc_LIBS += asyn
 adsIoc_LIBS += autosave
+adsIoc_LIBS += stream
 adsIoc_LIBS += $(EPICS_BASE_IOC_LIBS)
 
 #===========================

@@ -8,12 +8,12 @@ include $(TOP)/RELEASE_SITE
 # ===============================================================
 AUTOSAVE_MODULE_VERSION = R5.11-2.0.0
 IOCADMIN_MODULE_VERSION = R3.1.16-1.4.0
-ASYN_MODULE_VERSION = R4.39-1.0.2
-MOTOR_MODULE_VERSION = R6.9-ess-0.0.3
-ETHERCATMC_MODULE_VERSION = R2.1.0-0.1.4
-ADS_MODULE_VERSION = R2.0.0-0.0.10
+ASYN_MODULE_VERSION = R4.42-1.0.0
+MOTOR_MODULE_VERSION = R6.9-ess-0.0.4
+ETHERCATMC_MODULE_VERSION = R2.1.0-0.1.5
+ADS_MODULE_VERSION = R2.0.0-1.0.0
 CAPUTLOG_MODULE_VERSION = R4.0-1.0.0
-
+STREAMDEVICE_MODULE_VERSION  = R2.8.9-1.3.2
 # ============================================================
 # External Support module path definitions
 #
@@ -27,14 +27,18 @@ CAPUTLOG_MODULE_VERSION = R4.0-1.0.0
 #
 # If your build fails, look for these paths in your build output
 # ============================================================
+#MY_MODULES=/cds/home/z/zlentz/github/epics/ads-ioc-fix/modules
+
 AUTOSAVE=$(EPICS_MODULES)/autosave/$(AUTOSAVE_MODULE_VERSION)
 IOCADMIN=$(EPICS_MODULES)/iocAdmin/$(IOCADMIN_MODULE_VERSION)
 ETHERCATMC=$(EPICS_MODULES)/ethercatmc/$(ETHERCATMC_MODULE_VERSION)
+#ETHERCATMC=$(MY_MODULES)/ethercatmc
 MOTOR=$(EPICS_MODULES)/motor/$(MOTOR_MODULE_VERSION)
+#MOTOR=$(MY_MODULES)/motor
 ASYN=$(EPICS_MODULES)/asyn/$(ASYN_MODULE_VERSION)
 ADS=$(EPICS_MODULES)/twincat-ads/$(ADS_MODULE_VERSION)
 CAPUTLOG=$(EPICS_MODULES)/caPutLog/$(CAPUTLOG_MODULE_VERSION)
-
+STREAMDEVICE=$(EPICS_MODULES)/streamdevice/$(STREAMDEVICE_MODULE_VERSION)
 #MCB_MODULES=/reg/neh/home4/mcbrowne/git/modules
 
 # ===============================================================
@@ -73,6 +77,10 @@ endif
 
 ifeq ($(wildcard $(ADS)/lib/$(T_A)),)
 $(error Invalid ADS: $(ADS)/lib/$(T_A))
+endif
+
+ifeq ($(wildcard $(STREAMDEVICE)/lib/$(T_A)),)
+$(error Invalid STREAMDEVICE: $(STREAMDEVICE)/lib/$(T_A))
 endif
 
 ifeq ($(wildcard $(CAPUTLOG)/lib/$(T_A)),)
