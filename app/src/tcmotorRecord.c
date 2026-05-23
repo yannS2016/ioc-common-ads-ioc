@@ -128,6 +128,7 @@ static void init_callback(CALLBACK *pcb)
 }
 
 
+
 /* 
  * SPMG state values:  generated from menu(tcmotorSPMG) in tcmotorRecord.dbd
  * via DBDINC. The header defines tcmotorSPMGEnum with:
@@ -157,6 +158,16 @@ static void init_callback(CALLBACK *pcb)
  *  */
 #define HOME_LOW_LIMIT  2   /* HOMF: menu index 2 = LOW_LIMIT  */
 #define HOME_HIGH_LIMIT 3   /* HOMR: menu index 3 = HIGH_LIMIT */
+
+/* Momentary command pulse width (TWF/TWR/HOMF/HOMR): how long the command
+ * output and field hold at 1 before the deferred callback clears them to 0.
+ * The command symbols are EPICS-written (the PLC reads them and reports state
+ * via *_RBV; it does not reset the command symbol), so EPICS must return them
+ * to 0. This delay is the pulse width AND the race guard: it must be long
+ * enough for the ADS driver to forward the 1 and the PLC to see the rising edge
+ * before the 0 is written. It also lets a CA put return with the field reading
+ * 1 so clients see the command registered. */
+#define CMD_CLEAR_DELAY_SEC 0.2
 
 /* 
  * MSTA bit masks:  canonical motor record layout.
@@ -277,6 +288,77 @@ static long write_output_short(tcmotorRecord *prec, DBLINK *plink, short val)
         recGblSetSevr(prec, LINK_ALARM, INVALID_ALARM);
 
     return status;
+}
+
+/*
+ * stage_tweak
+ * Pre-stage the tweak step size to BOTH NC jog-increment PVs as soon as TWV is
+ * written, so the PLC/NC side already has the value loaded before TWF/TWR is
+ * pressed (gives the NC layer time to update). Debounced: only write when TWV
+ * differs from what was last sent. LJIF/LJIR are the "last increment sent"
+ * caches for the NC increment PVs (they track the current NC increment value),
+ * so staging updates both and a subsequent tweak that needs the same value
+ * skips the redundant write.
+ */
+static void stage_tweak(tcmotorRecord *prec)
+{
+    if (prec->twv != prec->ltwfi) {
+        write_output(prec, &prec->out_tif, prec->twv);
+        prec->ltwfi = prec->twv;
+    }
+    if (prec->twv != prec->ltwri) {
+        write_output(prec, &prec->out_tir, prec->twv);
+        prec->ltwri = prec->twv;
+    }
+}
+
+/*
+ * clear_cmds_callback
+ * Deferred clear for momentary boolean commands (TWF/TWR/HOMF/HOMR). The
+ * special() handler writes the command output = 1 and leaves the EPICS field
+ * at 1, then schedules this callback after CMD_CLEAR_DELAY_SEC.
+ *
+ * The command symbols (bJogFwdCmd/bJogBwdCmd/bHomeCmd) are EPICS-WRITTEN PVs:
+ * only EPICS sets their value. The PLC acts on the command and exposes its
+ * state via the separate *_RBV readbacks; it does NOT write back to the command
+ * symbol. So the command symbol stays latched at 1 until EPICS clears it. This
+ * callback issues that clear, turning each command into a proper momentary
+ * pulse (write 1 in special() -> hold CMD_CLEAR_DELAY_SEC so ADS forwards the 1
+ * and the PLC sees the rising edge -> write 0 here). The delay is the pulse
+ * width and the race guard: long enough that the PLC reliably sees the 1 before
+ * it is cleared. The EPICS command field is reset to 0 too, so it reads 0 at
+ * rest and the next press is a clean edge.
+ */
+static void clear_cmds_callback(CALLBACK *pcb)
+{
+    tcmotorRecord *prec;
+    callbackGetUser(prec, pcb);
+
+    dbScanLock((dbCommon *)prec);
+
+    if (prec->twf) {
+        write_output_short(prec, &prec->out_twf, 0);
+        prec->twf = 0; prec->ltwf = 0;
+        db_post_events(prec, &prec->twf, DBE_VALUE | DBE_LOG);
+    }
+    if (prec->twr) {
+        write_output_short(prec, &prec->out_twr, 0);
+        prec->twr = 0; prec->ltwr = 0;
+        db_post_events(prec, &prec->twr, DBE_VALUE | DBE_LOG);
+    }
+    if (prec->homf) {
+        write_output_short(prec, &prec->out_homf, 0);
+        prec->homf = 0;
+        db_post_events(prec, &prec->homf, DBE_VALUE | DBE_LOG);
+    }
+    if (prec->homr) {
+        /* HOMR shares the bHomeCmd output (out_homf); clear it too. */
+        write_output_short(prec, &prec->out_homf, 0);
+        prec->homr = 0;
+        db_post_events(prec, &prec->homr, DBE_VALUE | DBE_LOG);
+    }
+
+    dbScanUnlock((dbCommon *)prec);
 }
 
 /* 
@@ -499,6 +581,12 @@ static long init_record(struct dbCommon *pcommon, int pass)
     callbackSetPriority(priorityMedium, &prec->initcb);
     callbackRequestDelayed(&prec->initcb,
                            prec->idly > 0.0 ? prec->idly : 30.0);
+
+    /* Configure (but do not yet schedule) the momentary-command clear callback;
+     * it is scheduled on demand by TWF/TWR/HOMF/HOMR. */
+    callbackSetCallback(clear_cmds_callback, &prec->cmdcb);
+    callbackSetUser(prec, &prec->cmdcb);
+    callbackSetPriority(priorityMedium, &prec->cmdcb);
 
     /* Mark initialization complete */
     prec->binit = 1;
@@ -734,8 +822,8 @@ static long process(struct dbCommon *pcommon)
     POST_IF_CHG_D(hpos, lhpos)
     POST_IF_CHG_S(tdir, ltdir)
     if (prec->binit) POST_IF_CHG_S(spmg, lspmg)
-    POST_IF_CHG_S(lvio, llvio)    POST_IF_CHG_S(jogf, ljogf)
-    POST_IF_CHG_S(jogr, ljogr)
+    POST_IF_CHG_S(lvio, llvio)
+    POST_IF_CHG_S(twf,  ltwf)     POST_IF_CHG_S(twr,  ltwr)
     if (prec->msta != prec->lmsta) {
         db_post_events(prec, &prec->msta, DBE_VALUE | DBE_LOG);
         prec->lmsta = prec->msta;
@@ -924,23 +1012,28 @@ static long special(DBADDR *paddr, int after)
     } else if (paddr->pfield == (void *)&prec->homf) {
         /*
          * Home forward rising edge:  home via low limit switch.
-         * Set eHomeMode = LOW_LIMIT(1) then trigger bHomeCmd.
+         * Set eHomeMode = LOW_LIMIT(1) then trigger bHomeCmd. Field left at 1;
+         * deferred callback clears it after the delay.
          */
         if (prec->homf) {
             hmode = HOME_LOW_LIMIT;
             write_output_short(prec, &prec->out_hmod, hmode);
             write_output_short(prec, &prec->out_homf, 1);
+            callbackRequestDelayed(&prec->cmdcb, CMD_CLEAR_DELAY_SEC);
         }
 
     } else if (paddr->pfield == (void *)&prec->homr) {
         /*
          * Home reverse rising edge:  home via high limit switch.
-         * Set eHomeMode = HIGH_LIMIT(2) then trigger bHomeCmd.
+         * Set eHomeMode = HIGH_LIMIT(2) then trigger bHomeCmd (shared
+         * bHomeCmd output; direction is selected by eHomeMode). Field left at
+         * 1; deferred callback clears it after the delay.
          */
         if (prec->homr) {
             hmode = HOME_HIGH_LIMIT;
             write_output_short(prec, &prec->out_hmod, hmode);
             write_output_short(prec, &prec->out_homf, 1);
+            callbackRequestDelayed(&prec->cmdcb, CMD_CLEAR_DELAY_SEC);
         }
 
     } else if (paddr->pfield == (void *)&prec->spmg) {
@@ -959,34 +1052,41 @@ static long special(DBADDR *paddr, int after)
             prec->lspmg = prec->spmg;
         }
 
-    } else if (paddr->pfield == (void *)&prec->jogf) {
+    } else if (paddr->pfield == (void *)&prec->twv) {
         /*
-         * Jog forward rising edge:
-         *   1. Write VAL into NC:JogIncrFwd:Goal only if value changed.
-         *   2. Pulse bJogFwdCmd:  PLC executes jog and clears the cmd.
-         * No action on falling edge (PLC already cleared the command).
+         * Tweak step size written. Pre-stage it to BOTH NC jog-increment PVs
+         * now (debounced) so the PLC/NC side is ready before TWF/TWR is pressed.
+         * TWV has no move side-effect; it only updates the staged increment.
          */
-        if (prec->jogf) {
-            if (prec->val != prec->ljif) {
-                write_output(prec, &prec->out_jif, prec->val);
-                prec->ljif = prec->val;
-            }
-            write_output_short(prec, &prec->out_jogf, 1);
+        stage_tweak(prec);
+        recGblGetTimeStamp(prec);
+        db_post_events(prec, &prec->twv, DBE_VALUE | DBE_LOG);
+
+    } else if (paddr->pfield == (void *)&prec->twf) {
+        /*
+         * Tweak forward. The increment (TWV) is already staged in
+         * NC:JogIncFwd:Goal by the TWV handler; here we pulse bJogFwdCmd.
+         * stage_tweak() is a debounced safety net in case TWV was never written
+         * this session. The field is LEFT at 1 so the CA put returns showing 1;
+         * a deferred callback clears it (and the PLC command output) after a
+         * short delay, once ADS has forwarded the pulse to the PLC.
+         */
+        if (prec->twf) {
+            stage_tweak(prec);
+            write_output_short(prec, &prec->out_twf, 1);
+            callbackRequestDelayed(&prec->cmdcb, CMD_CLEAR_DELAY_SEC);
         }
 
-    } else if (paddr->pfield == (void *)&prec->jogr) {
+    } else if (paddr->pfield == (void *)&prec->twr) {
         /*
-         * Jog reverse rising edge:
-         *   1. Write VAL into NC:JogIncrBwd:Goal only if value changed.
-         *   2. Pulse bJogBwdCmd:  PLC executes jog and clears the cmd.
-         * No action on falling edge (PLC already cleared the command).
+         * Tweak reverse. Increment already staged in NC:JogIncBwd:Goal; pulse
+         * bJogBwdCmd. Field left at 1; deferred callback clears it after the
+         * delay (see TWF).
          */
-        if (prec->jogr) {
-            if (prec->val != prec->ljir) {
-                write_output(prec, &prec->out_jir, prec->val);
-                prec->ljir = prec->val;
-            }
-            write_output_short(prec, &prec->out_jogr, 1);
+        if (prec->twr) {
+            stage_tweak(prec);
+            write_output_short(prec, &prec->out_twr, 1);
+            callbackRequestDelayed(&prec->cmdcb, CMD_CLEAR_DELAY_SEC);
         }
     }
 
@@ -1025,8 +1125,8 @@ static long cvt_dbaddr(DBADDR *paddr)
              paddr->pfield == (void *)&prec->stop ||
              paddr->pfield == (void *)&prec->homf ||
              paddr->pfield == (void *)&prec->homr ||
-             paddr->pfield == (void *)&prec->jogf ||
-             paddr->pfield == (void *)&prec->jogr) {
+             paddr->pfield == (void *)&prec->twf  ||
+             paddr->pfield == (void *)&prec->twr) {
         paddr->field_type     = DBF_SHORT;
         paddr->field_size     = sizeof(epicsInt16);
         paddr->dbr_field_type = DBR_SHORT;

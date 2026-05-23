@@ -571,50 +571,67 @@ recordtype(tcmotor) {
         interest(1)
     }
 
-    # JOGF / JOGR — momentary jog commands.
-    # On rising edge, VAL is written into the NC jog increment PV for the
-    # corresponding direction, then the PLC jog command is pulsed.
-    # The PLC clears bJogFwdCmd/bJogBwdCmd itself after seeing the command.
-    # VAL is used as the jog increment so client screens need no extra field.
-    field(JOGF, DBF_SHORT) {
-        prompt("Jog Forward")
-        promptgroup("30 - Action")
-        asl(ASL0)
-        pp(TRUE)
-        special(SPC_MOD)
-        interest(1)
-    }
-    field(OUT_JOGF, DBF_OUTLINK) {
-        prompt("Jog Forward Output Link (bJogFwdCmd)")
+    # Tweak output links. The user-facing command is TWF/TWR/TWV (see below).
+    # These links bind to the PLC's MC_JOG symbols (bJogFwdCmd/bJogBwdCmd and
+    # NC:JogIncFwd/Bwd:Goal): from the PLC's perspective a tweak IS a jog
+    # (MC_JOG). The EPICS field names use the TWEAK nomenclature; the PLC symbol
+    # names they connect to are set in the template. The PLC clears the command
+    # bits itself after seeing them.
+    field(OUT_TWF, DBF_OUTLINK) {
+        prompt("Tweak Fwd Cmd Link (bJogFwdCmd)")
         promptgroup("50 - Output")
         interest(1)
     }
-    field(OUT_JIF, DBF_OUTLINK) {
-        prompt("Jog Fwd Increment Output Link (NC:JogIncrFwd:Goal)")
+    field(OUT_TIF, DBF_OUTLINK) {
+        prompt("Tweak Fwd Increment Link (NC:JogIncFwd:Goal)")
         promptgroup("50 - Output")
         interest(1)
     }
-    # RBK_JOGF intentionally omitted — bJogFwdCmd is a momentary pulse.
+    field(OUT_TWR, DBF_OUTLINK) {
+        prompt("Tweak Rev Cmd Link (bJogBwdCmd)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    field(OUT_TIR, DBF_OUTLINK) {
+        prompt("Tweak Rev Increment Link (NC:JogIncBwd:Goal)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    # RBK_* intentionally omitted — the commands are momentary pulses.
 
-    field(JOGR, DBF_SHORT) {
-        prompt("Jog Reverse")
+
+    # TWF / TWR — motor record tweak commands. Same PLC operation as JOGF/JOGR
+    # (MC_JOG relative move), reusing the tweak output links (OUT_TIF/OUT_TWF for
+    # forward, OUT_TIR/OUT_TWR for reverse). The tweak increment is TWV (the
+    # dedicated tweak step size), NOT VAL: VAL is a position setpoint that
+    # triggers an absolute move when written, so it cannot serve as the tweak
+    # increment. These fields exist because client code and operators expect the
+    # motor record tweak field names. Momentary: PLC clears the cmd after use.
+    field(TWV, DBF_DOUBLE) {
+        prompt("Tweak Step Size (EGU)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        interest(1)
+    }
+    field(TWF, DBF_SHORT) {
+        prompt("Tweak Motor Forward")
         promptgroup("30 - Action")
         asl(ASL0)
         pp(TRUE)
         special(SPC_MOD)
         interest(1)
     }
-    field(OUT_JOGR, DBF_OUTLINK) {
-        prompt("Jog Reverse Output Link (bJogBwdCmd)")
-        promptgroup("50 - Output")
+    field(TWR, DBF_SHORT) {
+        prompt("Tweak Motor Reverse")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        pp(TRUE)
+        special(SPC_MOD)
         interest(1)
     }
-    field(OUT_JIR, DBF_OUTLINK) {
-        prompt("Jog Rev Increment Output Link (NC:JogIncrBwd:Goal)")
-        promptgroup("50 - Output")
-        interest(1)
-    }
-    # RBK_JOGR intentionally omitted — bJogBwdCmd is a momentary pulse.
+    # TWF uses OUT_TIF/OUT_TWF, TWR uses
+    # OUT_TIR/OUT_TWR. No RBK_* — momentary pulses. TWV is a plain
+    # CA-owned setpoint (no special: writing it never moves the motor).
 
     # -----------------------------------------------------------------------
     # Internal tracking fields — SPC_NOMOD, not accessible by CA clients
@@ -670,6 +687,12 @@ recordtype(tcmotor) {
         special(SPC_NOMOD)
         interest(4)
         extra("CALLBACK initcb")
+    }
+    field(CMDCB, DBF_NOACCESS) {
+        prompt("Momentary Cmd Clear Callback")
+        special(SPC_NOMOD)
+        interest(4)
+        extra("CALLBACK cmdcb")
     }
     field(LVEL, DBF_DOUBLE) {
         prompt("Last Velo Sent")
@@ -727,9 +750,9 @@ recordtype(tcmotor) {
     field(LTDIR, DBF_SHORT) { prompt("Last TDIR Posted") special(SPC_NOMOD) interest(3) }
     field(LSPMG, DBF_MENU) { prompt("Last SPMG Posted") special(SPC_NOMOD) interest(3) menu(tcmotorSPMG) }
     field(LLVIO, DBF_SHORT) { prompt("Last LVIO Posted") special(SPC_NOMOD) interest(3) }
-    field(LJOGF, DBF_SHORT) { prompt("Last JOGF Posted") special(SPC_NOMOD) interest(3) }
-    field(LJOGR, DBF_SHORT) { prompt("Last JOGR Posted") special(SPC_NOMOD) interest(3) }
-    field(LJIF,  DBF_DOUBLE) { prompt("Last Jog Fwd Incr Sent") special(SPC_NOMOD) interest(3) }
-    field(LJIR,  DBF_DOUBLE) { prompt("Last Jog Rev Incr Sent") special(SPC_NOMOD) interest(3) }
+    field(LTWF,  DBF_SHORT) { prompt("Last TWF Posted")  special(SPC_NOMOD) interest(3) }
+    field(LTWR,  DBF_SHORT) { prompt("Last TWR Posted")  special(SPC_NOMOD) interest(3) }
+    field(LTWFI, DBF_DOUBLE) { prompt("Last Tweak Fwd Incr Sent") special(SPC_NOMOD) interest(3) }
+    field(LTWRI, DBF_DOUBLE) { prompt("Last Tweak Rev Incr Sent") special(SPC_NOMOD) interest(3) }
     field(LMSTA, DBF_ULONG) { prompt("Last MSTA Posted") special(SPC_NOMOD) interest(3) }
 }

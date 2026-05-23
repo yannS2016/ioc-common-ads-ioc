@@ -1,4 +1,4 @@
-# tcmotor.db
+# tcmotor.template
 #
 # Template for a single TwinCAT motor record instance.
 #
@@ -52,10 +52,10 @@ record(tcmotor, "$(PREFIX)$(M)") {
     field(OUT_HOMF, "$(PREFIX)$(M):bHomeCmd PP")
     field(OUT_HMOD, "$(PREFIX)$(M):eHomeMode PP")
     field(OUT_MCMD, "$(PREFIX)$(M):bMoveCmd PP")
-    field(OUT_JOGF, "$(PREFIX)$(M):bJogFwdCmd PP")
-    field(OUT_JIF,  "$(PREFIX)$(M):NC:JogIncFwd:Goal PP")
-    field(OUT_JOGR, "$(PREFIX)$(M):bJogBwdCmd PP")
-    field(OUT_JIR,  "$(PREFIX)$(M):NC:JogIncBwd:Goal PP")
+    field(OUT_TWF,  "$(PREFIX)$(M):bJogFwdCmd PP")
+    field(OUT_TIF,  "$(PREFIX)$(M):NC:JogIncFwd:Goal PP")
+    field(OUT_TWR,  "$(PREFIX)$(M):bJogBwdCmd PP")
+    field(OUT_TIR,  "$(PREFIX)$(M):NC:JogIncBwd:Goal PP")
     field(OUT_VELO, "$(PREFIX)$(M):fVelocity PP")
     field(OUT_VBAS, "$(PREFIX)$(M):NC:RefVel:Goal PP")
     field(OUT_VMAX, "$(PREFIX)$(M):NC:MaxVel:Goal PP")
