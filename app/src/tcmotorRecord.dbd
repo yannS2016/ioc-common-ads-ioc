@@ -117,6 +117,11 @@ recordtype(tcmotor) {
         interest(1)
     }
 
+    # Limit switches. The PLC publishes bForwardEnabled/bBackwardEnabled
+    # (active-low: 1=motion allowed, 0=at limit). The record inverts these
+    # at read time so HLS/LLS follow motor record convention (active-high:
+    # 1=limit hit). All downstream logic (MSTA, alarms) uses the
+    # active-high form.
     field(INP_HLS, DBF_INLINK) {
         prompt("High Limit Switch Input Link")
         promptgroup("40 - Input")
@@ -267,13 +272,14 @@ recordtype(tcmotor) {
     # Bits that have no tcmotor source (POSITION, SLIP_STALL, GAIN_SUPPORT)
     # retain their canonical positions and stay zero, so future Typhos
     # label tables line up regardless of which bits a given record sets.
-    # Note that limit switches are active-low at the EPICS layer (HLS/LLS=0
-    # means "limit hit") whereas MSTA bits are active-high (bit set means
-    # "limit hit"), so compute_msta() inverts them.
+    # HLS/LLS are stored in motor record convention (active-high, 1=limit
+    # hit); they are inverted from the PLC's active-low enables at read
+    # time. MSTA bits are also active-high, so compute_msta() uses them
+    # directly without further inversion.
     #
     #   bit  0  (0x0001) DIRECTION       TDIR     (1=positive)
     #   bit  1  (0x0002) DONE            DMOV
-    #   bit  2  (0x0004) PLUS_LS         !HLS     (inverted)
+    #   bit  2  (0x0004) PLUS_LS         HLS      (active-high)
     #   bit  3  (0x0008) HOMLS           ATHM     (home switch state)
     #   bit  4  (0x0010) -               unused
     #   bit  5  (0x0020) POSITION        unused   (closed-loop, no PLC source)
@@ -284,7 +290,7 @@ recordtype(tcmotor) {
     #   bit 10  (0x0400) MOVING          MOVN
     #   bit 11  (0x0800) GAIN_SUPPORT    unused
     #   bit 12  (0x1000) COMM_ERR        link alarm (one cycle lag)
-    #   bit 13  (0x2000) MINUS_LS        !LLS     (inverted)
+    #   bit 13  (0x2000) MINUS_LS        LLS      (active-high)
     #   bit 14  (0x4000) HOMED           HOMED    (latched, from PLC bHomed)
     #   bit 15  (0x8000) HOMING          HMNG     (tcmotor extension)
     field(MSTA, DBF_ULONG) {
@@ -719,7 +725,6 @@ recordtype(tcmotor) {
     field(LHOM,  DBF_SHORT) { prompt("Last HOMED Posted") special(SPC_NOMOD) interest(3) }
     field(LHPOS, DBF_DOUBLE) { prompt("Last HPOS Posted") special(SPC_NOMOD) interest(3) }
     field(LTDIR, DBF_SHORT) { prompt("Last TDIR Posted") special(SPC_NOMOD) interest(3) }
-    field(LSTOP, DBF_SHORT) { prompt("Last STOP Posted") special(SPC_NOMOD) interest(3) }
     field(LSPMG, DBF_MENU) { prompt("Last SPMG Posted") special(SPC_NOMOD) interest(3) menu(tcmotorSPMG) }
     field(LLVIO, DBF_SHORT) { prompt("Last LVIO Posted") special(SPC_NOMOD) interest(3) }
     field(LJOGF, DBF_SHORT) { prompt("Last JOGF Posted") special(SPC_NOMOD) interest(3) }

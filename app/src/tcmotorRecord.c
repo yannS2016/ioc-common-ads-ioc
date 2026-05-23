@@ -322,10 +322,11 @@ static void compute_msta(tcmotorRecord *prec)
 
     if (prec->dmov)  msta |= MSTA_DONE;
 
-    /* Limit switches: PLC convention is active-low (HLS/LLS=0 means
-     * "limit hit"), motor record MSTA convention is active-high. Invert. */
-    if (!prec->hls)  msta |= MSTA_PLUS_LS;
-    if (!prec->lls)  msta |= MSTA_MINUS_LS;
+    /* Limit switches: HLS/LLS are stored active-high (1=limit hit),
+     * inverted at read time from the PLC's active-low signals. MSTA bits
+     * are also active-high, so use them directly without inversion. */
+    if (prec->hls)  msta |= MSTA_PLUS_LS;
+    if (prec->lls)  msta |= MSTA_MINUS_LS;
 
     /* Home-related bits, per motor record convention:
      *   HOMLS   (bit 3) <- ATHM:  state of the home limit switch (instantaneous)
@@ -396,7 +397,7 @@ static void trigger_move(tcmotorRecord *prec)
 /* 
  * process_spmg
  * Manages bHalt based on SPMG state and detects DMOV rising edge
- * to revert MOVE(2) → PAUSE(1).
+ * to revert MOVE(2) -> PAUSE(1).
  *
  * SPMG states:
  *   0=Stop:  assert bHalt
@@ -414,7 +415,7 @@ static void process_spmg(tcmotorRecord *prec)
         prec->lsto = halt;
     }
 
-    /* Detect DMOV rising edge (0→1) when in MOVE state → revert to PAUSE */
+    /* Detect DMOV rising edge (0->1) when in MOVE state -> revert to PAUSE */
     if (prec->spmg == SPMG_MOVE && prec->dmov && !prec->pdmov) {
         prec->spmg = SPMG_PAUSE;
         /* Assert bHalt for new Pause state */
@@ -452,8 +453,11 @@ static long init_record(struct dbCommon *pcommon, int pass)
 
     v = prec->dmov; read_input(prec, &prec->inp_dmov, &v); prec->dmov = (short)v;
     v = prec->movn; read_input(prec, &prec->inp_movn, &v); prec->movn = (short)v;
-    v = prec->hls;  read_input(prec, &prec->inp_hls,  &v); prec->hls  = (short)v;
-    v = prec->lls;  read_input(prec, &prec->inp_lls,  &v); prec->lls  = (short)v;
+    /* HLS/LLS: PLC publishes active-low signals (0 = limit hit). Invert to
+     * motor record convention (HLS/LLS=1 means "limit hit"). Seed raw so a
+     * link failure leaves the field unchanged. */
+    v = !prec->hls;  read_input(prec, &prec->inp_hls,  &v); prec->hls  = (short)(!v);
+    v = !prec->lls;  read_input(prec, &prec->inp_lls,  &v); prec->lls  = (short)(!v);
     v = prec->athm; read_input(prec, &prec->inp_athm, &v); prec->athm = (short)v;
     v = prec->ndir; read_input(prec, &prec->inp_ndir, &v); prec->ndir = (short)v;
     v = prec->pdir; read_input(prec, &prec->inp_pdir, &v); prec->pdir = (short)v;
@@ -474,7 +478,7 @@ static long init_record(struct dbCommon *pcommon, int pass)
     /* Seed VAL from RBV so the first CA put doesn't issue a spurious
      * move to position 0. UDF is cleared so the record is considered
      * defined immediately, matching motor record convention.
-     * pdmov is initialized to match dmov so the VAL←RBV sync doesn't
+     * pdmov is initialized to match dmov so the VAL<-RBV sync doesn't
      * fire a spurious edge on the first process() cycle. */
     prec->val   = prec->rbv;
     prec->lval  = prec->val;
@@ -532,9 +536,11 @@ static long process(struct dbCommon *pcommon)
 
     v = prec->movn; read_input(prec, &prec->inp_movn, &v); prec->movn = (short)v;
 
-    v = prec->hls;  read_input(prec, &prec->inp_hls,  &v); prec->hls  = (short)v;
+    /* HLS/LLS inverted to motor record convention (1=limit hit); see
+     * init_record for rationale. Seed raw so a link failure is a no-op. */
+    v = !prec->hls;  read_input(prec, &prec->inp_hls,  &v); prec->hls  = (short)(!v);
 
-    v = prec->lls;  read_input(prec, &prec->inp_lls,  &v); prec->lls  = (short)v;
+    v = !prec->lls;  read_input(prec, &prec->inp_lls,  &v); prec->lls  = (short)(!v);
 
     v = prec->athm; read_input(prec, &prec->inp_athm, &v); prec->athm = (short)v;
 
@@ -609,7 +615,7 @@ static long process(struct dbCommon *pcommon)
      *
      * Per motor record convention, VAL tracks the current readback after
      * each move so the next CA put doesn't replay a stale setpoint as a
-     * new move. We detect move completion via DMOV rising edge (0→1) so
+     * new move. We detect move completion via DMOV rising edge (0->1) so
      * mid-move RBV changes don't cancel the commanded motion.
      *
      * SPMG gating: only sync when SPMG allows motion (Go or Move). If the
@@ -664,15 +670,16 @@ static long process(struct dbCommon *pcommon)
      * only raises severity (priority is highest-wins), so multiple sources
      * can contribute and the worst one survives.
      *
-     *   HLS=0 (high limit hit)  -> HLSV (default MAJOR)
-     *   LLS=0 (low limit hit)   -> LLSV (default MAJOR)
+     *   HLS=1 (high limit hit)  -> HLSV (default MAJOR)
+     *   LLS=1 (low limit hit)   -> LLSV (default MAJOR)
      *   LVIO=1 (soft limit hit) -> LSV  (default MAJOR)
      *   LERR=1 (PLC error)      -> hardcoded MAJOR; equivalent to motor
      *                              record SLIP_STALL/PROBLEM, always severe
+     * HLS/LLS are active-high (1=limit hit), inverted at read time.
      */
-    if (!prec->hls)
+    if (prec->hls)
         recGblSetSevr(prec, HIGH_ALARM, prec->hlsv);
-    if (!prec->lls)
+    if (prec->lls)
         recGblSetSevr(prec, LOW_ALARM,  prec->llsv);
     if (prec->lvio)
         recGblSetSevr(prec, HW_LIMIT_ALARM, prec->lsv);
@@ -1132,14 +1139,15 @@ static long get_alarm_double(DBADDR *paddr, struct dbr_alDouble *pad)
 {
     tcmotorRecord *prec = (tcmotorRecord *)paddr->precord;
 
-    /* Limit switches are active-low: 0 = limit hit (alarm), 1 = clear.
-     * Set alarm thresholds so Typhos shows orange only when value = 0. */
+    /* HLS/LLS are stored active-high (1 = limit hit, inverted at read time
+     * from the PLC's active-low signals). Set alarm thresholds so Typhos
+     * shows orange when the value = 1. */
     if (paddr->pfield == (void *)&prec->hls ||
         paddr->pfield == (void *)&prec->lls) {
-        pad->upper_alarm_limit   = 0.0;
-        pad->upper_warning_limit = 0.0;
-        pad->lower_warning_limit = 0.5;
-        pad->lower_alarm_limit   = 0.5;
+        pad->upper_alarm_limit   = 0.5;
+        pad->upper_warning_limit = 0.5;
+        pad->lower_warning_limit = 0.0;
+        pad->lower_alarm_limit   = 0.0;
     } else {
         pad->upper_alarm_limit   = 0.0;
         pad->upper_warning_limit = 0.0;
