@@ -608,6 +608,27 @@ static long init_record(struct dbCommon *pcommon, int pass)
     prec->val   = prec->rbv;
     prec->lval  = prec->val;
     prec->pdmov = prec->dmov;
+
+    /* Define the remaining velocity/accel setpoints now so none of the output
+     * fields (.VELO/.VBAS/.VMAX/.ACCS/.ACCL/.BDST/.CNEN) is left UDF during the
+     * IDLY wait before init_callback re-seeds them from the PLC RBK_* readbacks.
+     * UDF carries INVALID severity, which screens render as an alarm border; we
+     * clear it here so the record presents as defined from the first moment. The
+     * deferred init_output_fields() overwrites these with the real PLC values
+     * once ADS has connected. (INP_* fields keep CP MS, so a genuinely INVALID
+     * PLC readback still propagates its severity -- that diagnostic is retained.)
+     * Any field already holding a value (e.g. from autosave restore) is left as
+     * is; we only ensure it is defined, not that it is zero. */
+    prec->lvel = prec->velo;
+    prec->lacs = prec->accs;
+    prec->lvbs = prec->vbas;
+    prec->lvmx = prec->vmax;
+    prec->lbds = prec->bdst;
+    prec->lcne  = prec->cnen;
+    /* Keep ACCL consistent with whatever ACCS/VELO are defined to now. */
+    if (prec->accs > 0.0 && prec->velo > 0.0)
+        prec->accl = prec->velo / prec->accs;
+
     prec->udf   = FALSE;
 
     /* Compute derived fields */
@@ -855,6 +876,30 @@ static long process(struct dbCommon *pcommon)
      * would generate a third event. */
     if (monitor_mask)
         db_post_events(prec, &prec->val, monitor_mask);
+
+    /* Output/setpoint fields carry the record-wide severity in their monitor
+     * events but are otherwise only posted on a value change (CA put path /
+     * special()). When the record severity changes WITHOUT a value change --
+     * e.g. an error clears and SEVR drops MAJOR->NO_ALARM -- those fields would
+     * otherwise keep their last posted (stale) severity, leaving a latched
+     * alarm border on screens (spmg/velocity/etc.) even though STAT/SEVR are
+     * NO_ALARM. Re-post the alarm (DBE_ALARM only, no DBE_VALUE -- value did not
+     * change) on these fields whenever recGblResetAlarms reports an alarm
+     * change, so their severity tracks the record. */
+    if (monitor_mask & DBE_ALARM) {
+        db_post_events(prec, &prec->spmg, DBE_ALARM);
+        db_post_events(prec, &prec->velo, DBE_ALARM);
+        db_post_events(prec, &prec->vbas, DBE_ALARM);
+        db_post_events(prec, &prec->vmax, DBE_ALARM);
+        db_post_events(prec, &prec->accs, DBE_ALARM);
+        db_post_events(prec, &prec->accl, DBE_ALARM);
+        db_post_events(prec, &prec->hlm,  DBE_ALARM);
+        db_post_events(prec, &prec->llm,  DBE_ALARM);
+        db_post_events(prec, &prec->bdst, DBE_ALARM);
+        db_post_events(prec, &prec->off,  DBE_ALARM);
+        db_post_events(prec, &prec->cnen, DBE_ALARM);
+        db_post_events(prec, &prec->stop, DBE_ALARM);
+    }
 
     POST_IF_CHG_S(dmov, ldmov)
     POST_IF_CHG_S(movn, lmovn)
