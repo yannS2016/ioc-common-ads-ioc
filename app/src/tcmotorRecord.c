@@ -90,6 +90,10 @@ static void init_output_fields(tcmotorRecord *prec)
     prec->val  = rbk_val;   prec->lovl = rbk_val;
     prec->velo = rbk_velo;  prec->lvel = rbk_velo;
     prec->accs = rbk_accs;  prec->lacs = rbk_accs;
+    /* Derive ACCL (motor-record acceleration time) from the seeded ACCS rate
+     * and VELO so screens (Typhos) have a consistent value at startup. */
+    if (prec->accs > 0.0 && prec->velo > 0.0)
+        prec->accl = prec->velo / prec->accs;
     prec->cnen = (short)cnen_val; prec->lcne = prec->cnen;
     prec->hlm  = rbk_hlm;   prec->lhlm = rbk_hlm;
     prec->llm  = rbk_llm;   prec->lllm = rbk_llm;
@@ -110,6 +114,7 @@ static void init_output_fields(tcmotorRecord *prec)
     db_post_events(prec, &prec->vbas, DBE_VALUE | DBE_LOG);
     db_post_events(prec, &prec->vmax, DBE_VALUE | DBE_LOG);
     db_post_events(prec, &prec->accs, DBE_VALUE | DBE_LOG);
+    db_post_events(prec, &prec->accl, DBE_VALUE | DBE_LOG);
     db_post_events(prec, &prec->cnen, DBE_VALUE | DBE_LOG);
     db_post_events(prec, &prec->hlm,  DBE_VALUE | DBE_LOG);
     db_post_events(prec, &prec->llm,  DBE_VALUE | DBE_LOG);
@@ -387,6 +392,44 @@ static void compute_tdir(tcmotorRecord *prec)
     else if (prec->ndir)
         prec->tdir = 0;
     /* else: motor stopped, leave TDIR unchanged (last known direction) */
+}
+
+/*
+ * ACCL <-> ACCS conversion.
+ * ACCL (seconds, motor-record acceleration TIME, for Typhos/screen compat) and
+ * ACCS (EGU/s^2, the rate) are two views of the SAME underlying NC acceleration
+ * (fAcceleration/fDeceleration). They are related, ramping from 0 to VELO, by:
+ *     ACCS = VELO / ACCL      ACCL = VELO / ACCS
+ * Either field may be written; the handler recomputes the other and pushes the
+ * resulting ACCS rate to the NC accel/decel parameters (subject to SPMG). ACCL
+ * is treated as the sticky intent: a VELO change keeps ACCL and recomputes ACCS.
+ * Helpers recompute one field from the other and post the recomputed field.
+ * Guards avoid divide-by-zero / nonsensical values; on a bad input the dependent
+ * field is left unchanged.
+ */
+static void accl_from_accs(tcmotorRecord *prec)
+{
+    /* Recompute ACCL (time) from ACCS (rate) and current VELO. */
+    if (prec->accs > 0.0 && prec->velo > 0.0) {
+        double accl = prec->velo / prec->accs;
+        if (accl != prec->accl) {
+            prec->accl = accl;
+            db_post_events(prec, &prec->accl, DBE_VALUE | DBE_LOG);
+        }
+    }
+}
+
+static void accs_from_accl(tcmotorRecord *prec)
+{
+    /* Recompute ACCS (rate) from ACCL (time) and current VELO. Caller is
+     * responsible for pushing ACCS to the PLC (subject to SPMG). */
+    if (prec->accl > 0.0 && prec->velo > 0.0) {
+        double accs = prec->velo / prec->accl;
+        if (accs != prec->accs) {
+            prec->accs = accs;
+            db_post_events(prec, &prec->accs, DBE_VALUE | DBE_LOG);
+        }
+    }
 }
 
 /* 
@@ -899,16 +942,49 @@ static long special(DBADDR *paddr, int after)
             /* If SPMG blocks motion, lvel stays stale on purpose:  that's
              * the signal to trigger_move() that a push is owed. */
         }
+        /* ACCL (acceleration time) is the sticky intent: a VELO change keeps the
+         * ramp time and recomputes the ACCS rate (ACCS = VELO / ACCL), which is
+         * then pushed to the NC accel/decel parameters (subject to SPMG). ACCL
+         * and ACCS are two views of the one NC acceleration; any change to VELO,
+         * ACCL, or ACCS keeps them consistent and updates the PLC. */
+        accs_from_accl(prec);              /* recompute prec->accs (+posts) */
+        if (prec->accs != prec->lacs) {
+            if (prec->spmg == SPMG_GO || prec->spmg == SPMG_MOVE) {
+                write_output(prec, &prec->out_accs, prec->accs);
+                write_output(prec, &prec->out_decs, prec->accs);
+                prec->lacs = prec->accs;
+            }
+        }
 
     } else if (paddr->pfield == (void *)&prec->accs) {
         /*
          * ACCS written:  post monitor on change. Push to PLC (both
          * acceleration and deceleration) only if SPMG allows motion.
-         * Same deferred-write semantics as VELO.
+         * Same deferred-write semantics as VELO. ACCS is authoritative;
+         * recompute the derived ACCL (time) for screen consistency.
          */
         recGblGetTimeStamp(prec);
         if (prec->accs != prec->lacs) {
             db_post_events(prec, &prec->accs, DBE_VALUE | DBE_LOG);
+            if (prec->spmg == SPMG_GO || prec->spmg == SPMG_MOVE) {
+                write_output(prec, &prec->out_accs, prec->accs);
+                write_output(prec, &prec->out_decs, prec->accs);
+                prec->lacs = prec->accs;
+            }
+        }
+        accl_from_accs(prec);
+
+    } else if (paddr->pfield == (void *)&prec->accl) {
+        /*
+         * ACCL (acceleration time, motor-record compat for Typhos) written:
+         * derive the authoritative ACCS = VELO/ACCL, then push ACCS to the PLC
+         * exactly as the ACCS handler would (subject to SPMG). ACCL itself has
+         * no PLC link. accs_from_accl posts ACCS; we then drive the output.
+         */
+        recGblGetTimeStamp(prec);
+        db_post_events(prec, &prec->accl, DBE_VALUE | DBE_LOG);
+        accs_from_accl(prec);              /* updates prec->accs (+posts) */
+        if (prec->accs != prec->lacs) {
             if (prec->spmg == SPMG_GO || prec->spmg == SPMG_MOVE) {
                 write_output(prec, &prec->out_accs, prec->accs);
                 write_output(prec, &prec->out_decs, prec->accs);

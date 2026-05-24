@@ -512,6 +512,17 @@ recordtype(tcmotor) {
         special(SPC_MOD)
         interest(1)
     }
+    # ACCL: motor-record acceleration TIME (seconds) for screen compatibility
+    # (Typhos). Derived from / drives ACCS via ACCS = VELO / ACCL. ACCS is the
+    # authoritative rate sent to the PLC; ACCL has no PLC link. EPICS-owned, no
+    # power-on default of 0 issue since it is seeded from ACCS at init.
+    field(ACCL, DBF_DOUBLE) {
+        prompt("Acceleration Time (s)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
     field(OUT_ACCS, DBF_OUTLINK) {
         prompt("Acceleration Output Link (fAcceleration)")
         promptgroup("50 - Output")
@@ -520,6 +531,40 @@ recordtype(tcmotor) {
     field(OUT_DECS, DBF_OUTLINK) {
         prompt("Deceleration Output Link (fDeceleration)")
         promptgroup("50 - Output")
+        interest(1)
+    }
+
+    # ---------------------------------------------------------------------
+    # Motor-record compatibility placeholders (for Typhos screens).
+    # DECLARATIONS ONLY -- no special() handling, links, or logic yet.
+    # They exist so the standard motor screen fields connect instead of
+    # timing out; behavior to be implemented later.
+    #   DRBV  dial-coordinate readback   (screen: dial_position)
+    #   FOFF  offset freeze switch        (screen: offset_freeze_switch)
+    #   SET   set/use switch              (screen: set_use_switch)
+    #   DIR   user direction              (screen: user_offset_dir)
+    # ---------------------------------------------------------------------
+    field(DRBV, DBF_DOUBLE) {
+        prompt("Dial Readback Value")
+        asl(ASL0)
+        interest(1)
+    }
+    field(FOFF, DBF_SHORT) {
+        prompt("Offset Freeze Switch")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        interest(1)
+    }
+    field(SET, DBF_SHORT) {
+        prompt("Set/Use Switch")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        interest(1)
+    }
+    field(DIR, DBF_SHORT) {
+        prompt("User Direction")
+        promptgroup("30 - Action")
+        asl(ASL0)
         interest(1)
     }
 
