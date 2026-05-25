@@ -174,6 +174,16 @@ static void init_callback(CALLBACK *pcb)
  * 1 so clients see the command registered. */
 #define CMD_CLEAR_DELAY_SEC 0.2
 
+/* Move-command (bMoveCmd) clear delay. Much shorter than CMD_CLEAR_DELAY_SEC
+ * because of scanning: bDone/bBusy/fActPosition update only every ~100ms (the
+ * ADS poll), so a move that starts and finishes within one poll never shows a
+ * bBusy/MOVN rising edge for us to clear on. This timer is the fast fallback --
+ * it must be long enough for the PLC to latch the move on the bMoveCmd rising
+ * edge (a few ms: fast ADS write + sub-ms PLC scan) but well under the 100ms
+ * poll so even a sub-poll move clears promptly and does not bottleneck a scan.
+ * Tunable: raise if the PLC ever misses a move command, lower for faster scans. */
+#define MCMD_CLEAR_DELAY_SEC 0.03
+
 /* 
  * MSTA bit masks:  canonical motor record layout.
  * See motor.h in epics-modules/motor for the upstream definition.
@@ -366,6 +376,31 @@ static void clear_cmds_callback(CALLBACK *pcb)
     dbScanUnlock((dbCommon *)prec);
 }
 
+/*
+ * clear_mcmd_callback
+ * Fast fallback clear for bMoveCmd, scheduled by trigger_move after
+ * MCMD_CLEAR_DELAY_SEC. bMoveCmd is an EPICS-written command the PLC latches on
+ * the rising edge but does not reset, so EPICS must return it to 0. The PRIMARY
+ * clear is the MOVN rising edge in process() (move acknowledged); this timer is
+ * the fallback for moves that start and finish within one ~100ms ADS poll, where
+ * the bBusy/MOVN edge is never observed. The short delay is long enough for the
+ * PLC to latch the move (a few ms) but well under the poll period so scans are
+ * not bottlenecked. Clears only if still pending (bmcp): if the MOVN edge already
+ * cleared it, this is a no-op.
+ */
+static void clear_mcmd_callback(CALLBACK *pcb)
+{
+    tcmotorRecord *prec;
+    callbackGetUser(prec, pcb);
+
+    dbScanLock((dbCommon *)prec);
+    if (prec->bmcp) {
+        write_output_short(prec, &prec->out_mcmd, 0);
+        prec->bmcp = 0;
+    }
+    dbScanUnlock((dbCommon *)prec);
+}
+
 /* 
  * compute_lvio
  * Limit violation: 1 if RBV outside soft limits, 0 otherwise.
@@ -513,8 +548,21 @@ static void trigger_move(tcmotorRecord *prec)
     write_output(prec, &prec->out_val, prec->val);
     prec->lovl = prec->val;
 
-    /* Pulse bMoveCmd */
+    /* Pulse bMoveCmd. This is an EPICS-written command symbol: the PLC reads it
+     * to latch the move but does NOT reset it, so EPICS must return it to 0.
+     * Leaving it latched TRUE makes the PLC treat later fPosition changes as live
+     * move commands and can drive motion to a stale target.
+     *
+     * Clearing strategy (scan-friendly): the PRIMARY clear is event-driven --
+     * process() clears bMoveCmd on the rising edge of MOVN/bBusy, i.e. as soon
+     * as the PLC acknowledges the move by starting to move. That is much faster
+     * than a fixed delay and scales with scanning. The scheduled CMDCB callback
+     * is only a FALLBACK in case MOVN never pulses (e.g. a zero-length move that
+     * never asserts busy), so bMoveCmd cannot stay latched. bmcp marks the clear
+     * as pending for both paths. */
     write_output_short(prec, &prec->out_mcmd, 1);
+    prec->bmcp = 1;
+    callbackRequestDelayed(&prec->mcmdcb, MCMD_CLEAR_DELAY_SEC);
     /* Clear pending flag */
     prec->bvalp = 0;
 }
@@ -608,6 +656,7 @@ static long init_record(struct dbCommon *pcommon, int pass)
     prec->val   = prec->rbv;
     prec->lval  = prec->val;
     prec->pdmov = prec->dmov;
+    prec->pmovn = prec->movn;
 
     /* Define the remaining velocity/accel setpoints now so none of the output
      * fields (.VELO/.VBAS/.VMAX/.ACCS/.ACCL/.BDST/.CNEN) is left UDF during the
@@ -652,6 +701,10 @@ static long init_record(struct dbCommon *pcommon, int pass)
     callbackSetUser(prec, &prec->cmdcb);
     callbackSetPriority(priorityMedium, &prec->cmdcb);
 
+    callbackSetCallback(clear_mcmd_callback, &prec->mcmdcb);
+    callbackSetUser(prec, &prec->mcmdcb);
+    callbackSetPriority(priorityMedium, &prec->mcmdcb);
+
     /* Mark initialization complete */
     prec->binit = 1;
 
@@ -687,6 +740,17 @@ static long process(struct dbCommon *pcommon)
     v = prec->dmov; read_input(prec, &prec->inp_dmov, &v); prec->dmov = (short)v;
 
     v = prec->movn; read_input(prec, &prec->inp_movn, &v); prec->movn = (short)v;
+
+    /* Primary clear for bMoveCmd: on the rising edge of MOVN (PLC has
+     * acknowledged the move by starting to move / asserting busy), drop the
+     * command immediately. This is the scan-friendly path -- bMoveCmd is held
+     * only until motion is confirmed, not for a fixed delay. The scheduled CMDCB
+     * callback is just a fallback if this edge never arrives. pmovn holds the
+     * previous MOVN for edge detection (updated at end of process()). */
+    if (prec->bmcp && prec->movn && !prec->pmovn) {
+        write_output_short(prec, &prec->out_mcmd, 0);
+        prec->bmcp = 0;
+    }
 
     /* HLS/LLS inverted to motor record convention (1=limit hit); see
      * init_record for rationale. Seed raw so a link failure is a no-op. */
@@ -844,6 +908,10 @@ static long process(struct dbCommon *pcommon)
      * */
     if (prec->binit)
         process_spmg(prec);
+
+    /* Update previous MOVN for next-cycle rising-edge detection (bMoveCmd
+     * primary clear). Done here, after all MOVN-dependent logic for this cycle. */
+    prec->pmovn = prec->movn;
 
     /*
      * Timestamps and alarms
@@ -1112,23 +1180,28 @@ static long special(DBADDR *paddr, int after)
         db_post_events(prec, &prec->off, DBE_VALUE | DBE_LOG);
 
     } else if (paddr->pfield == (void *)&prec->stop) {
+        /*
+         * STOP is a purely momentary command: writing 1 stops motion
+         * (SPMG -> Stop, assert bHalt) and the field self-clears to 0.
+         * Writing STOP=0 (including the self-clear, a screen echo, or an
+         * autosave restore) has NO effect and must NOT resume motion: a stale
+         * STOP=0 must never silently restart a buffered move. Resume is done
+         * deliberately via an explicit SPMG=Go/Move write, not via this field.
+         */
         if (prec->stop) {
             write_output_short(prec, &prec->out_stop, 1);
             prec->lsto = 1;
             prec->spmg = SPMG_STOP;
-            /* STOP is a momentary command:  clear after sending */
+            /* STOP is momentary: clear the field after sending. */
             prec->stop = 0;
             db_post_events(prec, &prec->stop, DBE_VALUE | DBE_LOG);
-        } else {
-            prec->spmg = SPMG_GO;
-            write_output_short(prec, &prec->out_stop, 0);
-            prec->lsto = 0;
-            if (prec->bvalp)
-                trigger_move(prec);
+            recGblGetTimeStamp(prec);
+            if (prec->spmg != prec->lspmg) {
+                db_post_events(prec, &prec->spmg, DBE_VALUE | DBE_LOG);
+                prec->lspmg = prec->spmg;
+            }
         }
-        recGblGetTimeStamp(prec);
-        db_post_events(prec, &prec->spmg, DBE_VALUE | DBE_LOG);
-        prec->lspmg = prec->spmg;
+        /* prec->stop == 0: no-op (do not resume, do not trigger_move). */
 
     } else if (paddr->pfield == (void *)&prec->homf) {
         /*

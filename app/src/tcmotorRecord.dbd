@@ -707,8 +707,18 @@ recordtype(tcmotor) {
         special(SPC_NOMOD)
         interest(3)
     }
+    field(BMCP, DBF_SHORT) {
+        prompt("bMoveCmd Clear Pending Flag")
+        special(SPC_NOMOD)
+        interest(3)
+    }
     field(PDMOV, DBF_SHORT) {
         prompt("Previous DMOV for edge detection")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(PMOVN, DBF_SHORT) {
+        prompt("Previous MOVN for edge detection")
         special(SPC_NOMOD)
         interest(3)
     }
@@ -738,6 +748,12 @@ recordtype(tcmotor) {
         special(SPC_NOMOD)
         interest(4)
         extra("CALLBACK cmdcb")
+    }
+    field(MCMDCB, DBF_NOACCESS) {
+        prompt("Move Cmd Clear Callback")
+        special(SPC_NOMOD)
+        interest(4)
+        extra("CALLBACK mcmdcb")
     }
     field(LVEL, DBF_DOUBLE) {
         prompt("Last Velo Sent")
@@ -801,3 +817,4 @@ recordtype(tcmotor) {
     field(LTWRI, DBF_DOUBLE) { prompt("Last Tweak Rev Incr Sent") special(SPC_NOMOD) interest(3) }
     field(LMSTA, DBF_ULONG) { prompt("Last MSTA Posted") special(SPC_NOMOD) interest(3) }
 }
+
