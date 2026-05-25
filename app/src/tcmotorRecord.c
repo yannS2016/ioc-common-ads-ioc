@@ -1029,8 +1029,11 @@ static long special(DBADDR *paddr, int after)
          */
         prec->bvalp = 1;  /* mark pending move */
         recGblGetTimeStamp(prec);
+        /* Do NOT post VAL here: it is the field the CA put just wrote, and the
+         * put path posts the monitor automatically. Posting again doubles the
+         * event (see note in process()). Only update the last-value cache so the
+         * move-trigger / VAL<-RBV logic tracks correctly. */
         if (prec->val != prec->lval) {
-            db_post_events(prec, &prec->val, DBE_VALUE | DBE_LOG);
             prec->lval = prec->val;
         }
         if (prec->spmg == SPMG_GO || prec->spmg == SPMG_MOVE) {
@@ -1047,7 +1050,7 @@ static long special(DBADDR *paddr, int after)
          */
         recGblGetTimeStamp(prec);
         if (prec->velo != prec->lvel) {
-            db_post_events(prec, &prec->velo, DBE_VALUE | DBE_LOG);
+            /* No self-post: CA put posts VELO automatically. */
             if (prec->spmg == SPMG_GO || prec->spmg == SPMG_MOVE) {
                 write_output(prec, &prec->out_velo, prec->velo);
                 prec->lvel = prec->velo;
@@ -1078,7 +1081,7 @@ static long special(DBADDR *paddr, int after)
          */
         recGblGetTimeStamp(prec);
         if (prec->accs != prec->lacs) {
-            db_post_events(prec, &prec->accs, DBE_VALUE | DBE_LOG);
+            /* No self-post: CA put posts ACCS automatically. */
             if (prec->spmg == SPMG_GO || prec->spmg == SPMG_MOVE) {
                 write_output(prec, &prec->out_accs, prec->accs);
                 write_output(prec, &prec->out_decs, prec->accs);
@@ -1095,7 +1098,7 @@ static long special(DBADDR *paddr, int after)
          * no PLC link. accs_from_accl posts ACCS; we then drive the output.
          */
         recGblGetTimeStamp(prec);
-        db_post_events(prec, &prec->accl, DBE_VALUE | DBE_LOG);
+        /* No self-post: CA put posts ACCL automatically. */
         accs_from_accl(prec);              /* updates prec->accs (+posts) */
         if (prec->accs != prec->lacs) {
             if (prec->spmg == SPMG_GO || prec->spmg == SPMG_MOVE) {
@@ -1113,7 +1116,7 @@ static long special(DBADDR *paddr, int after)
             prec->lvbs = prec->vbas;
         }
         recGblGetTimeStamp(prec);
-        db_post_events(prec, &prec->vbas, DBE_VALUE | DBE_LOG);
+        /* No self-post: CA put posts VBAS automatically. */
 
     } else if (paddr->pfield == (void *)&prec->vmax) {
         /* CA-only field (no INP_VMAX): suppress redundant ADS write,
@@ -1123,7 +1126,7 @@ static long special(DBADDR *paddr, int after)
             prec->lvmx = prec->vmax;
         }
         recGblGetTimeStamp(prec);
-        db_post_events(prec, &prec->vmax, DBE_VALUE | DBE_LOG);
+        /* No self-post: CA put posts VMAX automatically. */
 
     } else if (paddr->pfield == (void *)&prec->cnen) {
         /* CA-only field (no INP_CNEN): suppress redundant ADS write,
@@ -1133,7 +1136,7 @@ static long special(DBADDR *paddr, int after)
             prec->lcne = prec->cnen;
         }
         recGblGetTimeStamp(prec);
-        db_post_events(prec, &prec->cnen, DBE_VALUE | DBE_LOG);
+        /* No self-post: CA put posts CNEN automatically. */
 
     } else if (paddr->pfield == (void *)&prec->bdst) {
         /* CA-only field (no INP_BDST): suppress redundant ADS write,
@@ -1143,7 +1146,8 @@ static long special(DBADDR *paddr, int after)
             prec->lbds = prec->bdst;
         }
         recGblGetTimeStamp(prec);
-        db_post_events(prec, &prec->bdst, DBE_VALUE | DBE_LOG);
+        /* No self-post: CA put posts BDST automatically (PLC-echo changes
+         * post via process() SYNC_FROM_PLC_D). */
 
     } else if (paddr->pfield == (void *)&prec->hlm) {
         /* CA-only field (no INP_HLM): suppress redundant ADS write,
@@ -1153,7 +1157,8 @@ static long special(DBADDR *paddr, int after)
             prec->lhlm = prec->hlm;
         }
         recGblGetTimeStamp(prec);
-        db_post_events(prec, &prec->hlm, DBE_VALUE | DBE_LOG);
+        /* No self-post: CA put posts HLM automatically (PLC-echo changes
+         * post via process() SYNC_FROM_PLC_D). */
 
     } else if (paddr->pfield == (void *)&prec->llm) {
         /* CA-only field (no INP_LLM): suppress redundant ADS write,
@@ -1163,7 +1168,8 @@ static long special(DBADDR *paddr, int after)
             prec->lllm = prec->llm;
         }
         recGblGetTimeStamp(prec);
-        db_post_events(prec, &prec->llm, DBE_VALUE | DBE_LOG);
+        /* No self-post: CA put posts LLM automatically (PLC-echo changes
+         * post via process() SYNC_FROM_PLC_D). */
 
     } else if (paddr->pfield == (void *)&prec->off) {
         /* CA write to OFF: push to PLC and post a monitor.
@@ -1177,7 +1183,8 @@ static long special(DBADDR *paddr, int after)
             prec->loff = prec->off;
         }
         recGblGetTimeStamp(prec);
-        db_post_events(prec, &prec->off, DBE_VALUE | DBE_LOG);
+        /* No self-post: CA put posts OFF automatically (PLC-echo changes
+         * post via process() SYNC_FROM_PLC_D). */
 
     } else if (paddr->pfield == (void *)&prec->stop) {
         /*
@@ -1241,10 +1248,11 @@ static long special(DBADDR *paddr, int after)
             write_output_short(prec, &prec->out_stop, 1);
             prec->lsto = 1;
         }
-        if (prec->spmg != prec->lspmg) {
-            db_post_events(prec, &prec->spmg, DBE_VALUE | DBE_LOG);
-            prec->lspmg = prec->spmg;
-        }
+        /* Do NOT post SPMG here: it is the field the CA put just wrote, and the
+         * put path posts the monitor automatically. Posting again doubles the
+         * event. Sync lspmg so the binit-gated POST_IF_CHG in process() does not
+         * re-post, and so the internal auto-revert (process_spmg) edge is clean. */
+        prec->lspmg = prec->spmg;
 
     } else if (paddr->pfield == (void *)&prec->twv) {
         /*
@@ -1254,7 +1262,7 @@ static long special(DBADDR *paddr, int after)
          */
         stage_tweak(prec);
         recGblGetTimeStamp(prec);
-        db_post_events(prec, &prec->twv, DBE_VALUE | DBE_LOG);
+        /* No self-post: CA put posts TWV automatically. */
 
     } else if (paddr->pfield == (void *)&prec->twf) {
         /*
