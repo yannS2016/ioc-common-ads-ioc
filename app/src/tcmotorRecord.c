@@ -372,6 +372,15 @@ static void clear_cmds_callback(CALLBACK *pcb)
         prec->homr = 0;
         db_post_events(prec, &prec->homr, DBE_VALUE | DBE_LOG);
     }
+    if (prec->lsto) {
+        /* bHalt is momentary: STOP asserted it to decelerate an in-progress
+         * move; the PLC latches the halt and clears bHalt itself, so EPICS must
+         * return it to 0 (leaving it TRUE would make a later PLC-side clear plus
+         * a stale EPICS TRUE look like a fresh halt). Cleared here after the
+         * delay, like the other momentary commands. */
+        write_output_short(prec, &prec->out_stop, 0);
+        prec->lsto = 0;
+    }
 
     dbScanUnlock((dbCommon *)prec);
 }
@@ -527,6 +536,19 @@ static void compute_msta(tcmotorRecord *prec)
  *  */
 static void trigger_move(tcmotorRecord *prec)
 {
+    /* AUTHORITATIVE MOTION GATE (single chokepoint).
+     * STOP/PAUSE must suppress all motion commanding -- this does NOT depend on
+     * bHalt (bHalt only decelerates an already-moving axis within a ramp; it
+     * does not prevent a new move). The real interlock is simply: in Stop or
+     * Pause, do not pulse bMoveCmd and do not update fPosition. If trigger_move
+     * is reached in a non-Go/Move state by any path, send nothing and leave the
+     * pending-move flag armed so the move issues when SPMG next goes Go/Move.
+     * This makes suppression independent of every caller's own gate. */
+    if (prec->spmg != SPMG_GO && prec->spmg != SPMG_MOVE) {
+        prec->bvalp = 1;     /* keep the move pending for resume */
+        return;
+    }
+
     /* Forward motion parameters and request the move.
      * Caller must have set PACT=TRUE so PP DB_LINK targets process.
      *
@@ -580,23 +602,15 @@ static void trigger_move(tcmotorRecord *prec)
  *  */
 static void process_spmg(tcmotorRecord *prec)
 {
-    short halt = (prec->spmg == SPMG_STOP || prec->spmg == SPMG_PAUSE) ? 1 : 0;
+    /* SPMG state does NOT drive bHalt. Suppression of new motion in Stop/Pause
+     * is enforced by the trigger_move gate (no bMoveCmd / no fPosition update),
+     * independent of bHalt. Only the momentary STOP field asserts bHalt, to
+     * decelerate an axis that is already moving. */
 
-    /* Forward bHalt only when changed */
-    if (halt != prec->lsto) {
-        write_output_short(prec, &prec->out_stop, halt);
-        prec->lsto = halt;
-    }
-
-    /* Detect DMOV rising edge (0->1) when in MOVE state -> revert to PAUSE */
+    /* Detect DMOV rising edge (0->1) when in MOVE state -> revert to PAUSE.
+     * This is the one-shot semantics of Move: execute one move, then hold. */
     if (prec->spmg == SPMG_MOVE && prec->dmov && !prec->pdmov) {
         prec->spmg = SPMG_PAUSE;
-        /* Assert bHalt for new Pause state */
-        if (prec->lsto != 1) {
-            write_output_short(prec, &prec->out_stop, 1);
-            prec->lsto = 1;
-        }
-        /* Post SPMG monitor for the revert */
         recGblGetTimeStamp(prec);
         db_post_events(prec, &prec->spmg, DBE_VALUE | DBE_LOG);
         prec->lspmg = prec->spmg;
@@ -1188,27 +1202,25 @@ static long special(DBADDR *paddr, int after)
 
     } else if (paddr->pfield == (void *)&prec->stop) {
         /*
-         * STOP is a purely momentary command: writing 1 stops motion
-         * (SPMG -> Stop, assert bHalt) and the field self-clears to 0.
-         * Writing STOP=0 (including the self-clear, a screen echo, or an
-         * autosave restore) has NO effect and must NOT resume motion: a stale
-         * STOP=0 must never silently restart a buffered move. Resume is done
-         * deliberately via an explicit SPMG=Go/Move write, not via this field.
+         * STOP is a purely momentary "decelerate now" command. It pulses bHalt
+         * (the PLC latches the halt and clears bHalt itself, so EPICS must not
+         * hold it -- the reset callback returns it to 0) and self-clears the
+         * field. STOP does NOT change SPMG: stopping the physical motion and the
+         * motion-gating STATE are separate concerns. To put the stage in the
+         * no-move state, write SPMG=Stop directly (that engages the trigger_move
+         * gate). Writing STOP=0 is a no-op (a stale/echoed 0 must not do
+         * anything).
          */
         if (prec->stop) {
             write_output_short(prec, &prec->out_stop, 1);
             prec->lsto = 1;
-            prec->spmg = SPMG_STOP;
+            callbackRequestDelayed(&prec->cmdcb, CMD_CLEAR_DELAY_SEC);
             /* STOP is momentary: clear the field after sending. */
             prec->stop = 0;
-            db_post_events(prec, &prec->stop, DBE_VALUE | DBE_LOG);
             recGblGetTimeStamp(prec);
-            if (prec->spmg != prec->lspmg) {
-                db_post_events(prec, &prec->spmg, DBE_VALUE | DBE_LOG);
-                prec->lspmg = prec->spmg;
-            }
+            db_post_events(prec, &prec->stop, DBE_VALUE | DBE_LOG);
         }
-        /* prec->stop == 0: no-op (do not resume, do not trigger_move). */
+        /* prec->stop == 0: no-op. */
 
     } else if (paddr->pfield == (void *)&prec->homf) {
         /*
@@ -1239,14 +1251,22 @@ static long special(DBADDR *paddr, int after)
 
     } else if (paddr->pfield == (void *)&prec->spmg) {
         recGblGetTimeStamp(prec);
+        /* Two independent mechanisms:
+         *  - The trigger_move gate blocks NEW motion while in Stop/Pause (no
+         *    bMoveCmd / no fPosition), independent of bHalt.
+         *  - bHalt (momentary) decelerates a move ALREADY in progress. We pulse
+         *    it on the transition into Stop/Pause, then the reset callback clears
+         *    it (the PLC latches the halt and clears bHalt itself, so EPICS must
+         *    not hold it). This mirrors the momentary STOP field.
+         * Go/Move simply resumes any pending move. */
         if (prec->spmg == SPMG_GO || prec->spmg == SPMG_MOVE) {
-            write_output_short(prec, &prec->out_stop, 0);
-            prec->lsto = 0;
             if (prec->bvalp)
                 trigger_move(prec);
         } else {
+            /* Entering Stop or Pause: pulse bHalt to stop a move in progress. */
             write_output_short(prec, &prec->out_stop, 1);
             prec->lsto = 1;
+            callbackRequestDelayed(&prec->cmdcb, CMD_CLEAR_DELAY_SEC);
         }
         /* Do NOT post SPMG here: it is the field the CA put just wrote, and the
          * put path posts the monitor automatically. Posting again doubles the
