@@ -35,6 +35,7 @@ record(tcmotor, "$(PREFIX)$(M)") {
     field(INP_LLM,  "$(PREFIX)$(M):NC:MinPos:Val_RBV CP MS")
     field(INP_HOMED,"$(PREFIX)$(M):bHomed_RBV CP MS")
     field(INP_HPOS, "$(PREFIX)$(M):fHomePosition_RBV CP MS")
+
     # Read once in process() on first PINI scan to seed output field
     # initial values from the PLC.
     field(RBK_VAL,  "$(PREFIX)$(M):fPosition_RBV")
@@ -47,6 +48,8 @@ record(tcmotor, "$(PREFIX)$(M)") {
     field(RBK_LLM,  "$(PREFIX)$(M):NC:MinPos:Val_RBV")
     field(RBK_BDST, "$(PREFIX)$(M):NC:Backlash:Val_RBV")
     field(RBK_OFF,  "$(PREFIX)$(M):NC:PosBias:Val_RBV")
+    field(RBK_TWV,  "$(PREFIX)$(M):NC:JogIncFwd:Val_RBV")
+
     field(OUT_VAL,  "$(PREFIX)$(M):fPosition PP")
     field(OUT_STOP, "$(PREFIX)$(M):bHalt PP")
     field(OUT_HOMF, "$(PREFIX)$(M):bHomeCmd PP")

@@ -70,6 +70,7 @@ static void init_output_fields(tcmotorRecord *prec)
     double rbk_val  = 0, rbk_velo = 0, rbk_accs = 0;
     double rbk_hlm  = 0, rbk_llm  = 0, rbk_bdst = 0;
     double rbk_off  = 0;
+    double rbk_twv  = 0;
 
     dbGetLink(&prec->rbk_val,  DBR_DOUBLE, &rbk_val,  NULL, NULL);
     dbGetLink(&prec->rbk_velo, DBR_DOUBLE, &rbk_velo, NULL, NULL);
@@ -79,6 +80,7 @@ static void init_output_fields(tcmotorRecord *prec)
     dbGetLink(&prec->rbk_llm,  DBR_DOUBLE, &rbk_llm,  NULL, NULL);
     dbGetLink(&prec->rbk_bdst, DBR_DOUBLE, &rbk_bdst, NULL, NULL);
     dbGetLink(&prec->rbk_off,  DBR_DOUBLE, &rbk_off,  NULL, NULL);
+    dbGetLink(&prec->rbk_twv,  DBR_DOUBLE, &rbk_twv,  NULL, NULL);
 
     /* VBAS and VMAX:  base and max velocity from PLC */
     double rbk_vbas = 0, rbk_vmax = 0;
@@ -101,12 +103,15 @@ static void init_output_fields(tcmotorRecord *prec)
     prec->vbas = rbk_vbas;  prec->lvbs = rbk_vbas;
     prec->vmax = rbk_vmax;  prec->lvmx = rbk_vmax;
     prec->off  = rbk_off;   prec->loff = rbk_off;
+    prec->twv  = rbk_twv;
+    prec->ltwfi = rbk_twv;
+    prec->ltwri = rbk_twv;
 
-    errlogPrintf("tcmotor %s init: val=%.3f velo=%.3f vbas=%.3f vmax=%.3f "
-                 "accs=%.3f cnen=%d hlm=%.3f llm=%.3f bdst=%.3f off=%.3f\n",
+    errlogPrintf("%s: val=%.3f velo=%.3f vbas=%.3f vmax=%.3f "
+                 "accs=%.3f cnen=%d hlm=%.3f llm=%.3f bdst=%.3f off=%.3f twv=%.3f\n",
                  prec->name, prec->val, prec->velo, prec->vbas, prec->vmax,
                  prec->accs, prec->cnen, prec->hlm, prec->llm, prec->bdst,
-                 prec->off);
+                 prec->off, prec->twv);
 
     recGblGetTimeStamp(prec);
     db_post_events(prec, &prec->val,  DBE_VALUE | DBE_LOG);
@@ -120,6 +125,7 @@ static void init_output_fields(tcmotorRecord *prec)
     db_post_events(prec, &prec->llm,  DBE_VALUE | DBE_LOG);
     db_post_events(prec, &prec->bdst, DBE_VALUE | DBE_LOG);
     db_post_events(prec, &prec->off,  DBE_VALUE | DBE_LOG);
+    db_post_events(prec, &prec->twv,  DBE_VALUE | DBE_LOG);
     prec->lval = prec->val;
 
     dbScanUnlock((dbCommon *)prec);

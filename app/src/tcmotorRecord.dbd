@@ -412,6 +412,8 @@ recordtype(tcmotor) {
     field(RBK_LLM,  DBF_INLINK) { prompt("LLM init readback")  special(SPC_NOMOD) interest(3) }
     field(RBK_BDST, DBF_INLINK) { prompt("BDST init readback") special(SPC_NOMOD) interest(3) }
     field(RBK_OFF,  DBF_INLINK) { prompt("OFF init readback")  special(SPC_NOMOD) interest(3) }
+    field(RBK_TWV,  DBF_INLINK) { prompt("TWV init readback")  special(SPC_NOMOD) interest(3) }
+
     field(OUT_VAL, DBF_OUTLINK) {
         prompt("Position Output Link")
         promptgroup("50 - Output")
