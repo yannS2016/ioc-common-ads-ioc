@@ -1229,7 +1229,7 @@ static long special(DBADDR *paddr, int after)
          * deferred callback clears it after the delay.
          */
         if (prec->homf) {
-            hmode = HOME_LOW_LIMIT;
+            hmode = HOME_HIGH_LIMIT;
             write_output_short(prec, &prec->out_hmod, hmode);
             write_output_short(prec, &prec->out_homf, 1);
             callbackRequestDelayed(&prec->cmdcb, CMD_CLEAR_DELAY_SEC);
@@ -1243,7 +1243,7 @@ static long special(DBADDR *paddr, int after)
          * 1; deferred callback clears it after the delay.
          */
         if (prec->homr) {
-            hmode = HOME_HIGH_LIMIT;
+            hmode = HOME_LOW_LIMIT;
             write_output_short(prec, &prec->out_hmod, hmode);
             write_output_short(prec, &prec->out_homf, 1);
             callbackRequestDelayed(&prec->cmdcb, CMD_CLEAR_DELAY_SEC);
