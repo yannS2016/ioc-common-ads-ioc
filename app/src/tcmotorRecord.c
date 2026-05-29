@@ -23,8 +23,8 @@
  *             3=Go           -> clear bHalt, normal operation
  *
  *   HOMF/HOMR special handler:
- *             HOMF -> eHomeMode=LOW_LIMIT(1)  + bHomeCmd=1
- *             HOMR -> eHomeMode=HIGH_LIMIT(2) + bHomeCmd=1
+ *             HOMF -> eHomeMode=HIGH_LIMIT(2)  + bHomeCmd=1
+ *             HOMR -> eHomeMode=LOW_LIMIT(1) + bHomeCmd=1
  *             Both share OUT_HOMF (bHomeCmd) and OUT_HMOD (eHomeMode).
  *
  * Output forwarding:
@@ -153,16 +153,16 @@ static void init_callback(CALLBACK *pcb)
  * Menu order confirmed by caput testing on eHomeMode:
  *   0 = NONE
  *   1 = AUTOZERO
- *   2 = LOW_LIMIT   <- HOMF
- *   3 = HIGH_LIMIT  <- HOMR
+ *   2 = LOW_LIMIT   <- HOMR
+ *   3 = HIGH_LIMIT  <- HOMF
  *   4 = HOME_INDEX
  *   5 = HOME_VIA_LOW
  *   6 = HOME_VIA_HIGH
  *   7 = ABSOLUTE_SET
  *   8 = CURRENT_POSITION_METHOD
  *  */
-#define HOME_LOW_LIMIT  2   /* HOMF: menu index 2 = LOW_LIMIT  */
-#define HOME_HIGH_LIMIT 3   /* HOMR: menu index 3 = HIGH_LIMIT */
+#define HOME_LOW_LIMIT  2   /* HOMR: menu index 2 = LOW_LIMIT  */
+#define HOME_HIGH_LIMIT 3   /* HOMF: menu index 3 = HIGH_LIMIT */
 
 /* Momentary command pulse width (TWF/TWR/HOMF/HOMR): how long the command
  * output and field hold at 1 before the deferred callback clears them to 0.
