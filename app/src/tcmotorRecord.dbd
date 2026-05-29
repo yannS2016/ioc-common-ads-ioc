@@ -656,6 +656,7 @@ recordtype(tcmotor) {
         prompt("Tweak Step Size (EGU)")
         promptgroup("30 - Action")
         asl(ASL0)
+        special(SPC_MOD)
         interest(1)
     }
     field(TWF, DBF_SHORT) {
