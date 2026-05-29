@@ -1,0 +1,823 @@
+# tcmotorRecord.dbd
+#
+# Record type definition for the TwinCAT Motor (tcmotor) record.
+#
+# Provides motor record field naming convention (.VAL, .RBV, .DMOV etc.)
+# for TwinCAT ADS-based motors with no internal motion logic.
+#
+# Link field naming convention:
+#   INP_*  — input link fields (CP links from PLC status PVs)
+#   OUT_*  — output link fields (PP links to PLC command PVs)
+#   RBK_*  — init-only readback links (CA from PLC _RBV counterparts,
+#             read once at PINI to seed initial output field values)
+#
+# Computed fields (derived in process, not directly linked):
+#   TDIR   — computed from INP_NDIR + INP_PDIR
+#   MSTA   — computed from all status bools (motor record bit convention)
+#   SPMG   — Stop/Pause/Move/Go state machine owned by tcmotor
+#             (replaces FB_MotionSPMG in the PLC)
+
+menu(tcmotorSPMG) {
+    choice(tcmotorSPMG_Stop,  "Stop")
+    choice(tcmotorSPMG_Pause, "Pause")
+    choice(tcmotorSPMG_Move,  "Move")
+    choice(tcmotorSPMG_Go,    "Go")
+}
+
+recordtype(tcmotor) {
+
+    # -----------------------------------------------------------------------
+    # Standard fields common to all records
+    # -----------------------------------------------------------------------
+    include "dbCommon.dbd"
+
+    # -----------------------------------------------------------------------
+    # Display / engineering fields
+    #
+    # EGU and PREC are NOT provided by dbCommon.dbd — that file contains only
+    # NAME, DESC, ASG, SCAN, PINI, PHAS, EVNT, TSE, TSEL, DTYP, DISV, DISA,
+    # SDIS, MLOK, MLIS, BKLNK, DISP, PROC, STAT, SEVR, AMSG, NSTA, NSEV,
+    # NAMSG, ACKS, ACKT, DISS, LCNT, PACT, PUTF, RPRO, ASP, PPN, PPNR, SPVT,
+    # RSET, DSET, DPVT, RDES, LSET, PRIO, TPRO, BKPT, UDF, UDFS, TIME, UTAG,
+    # FLNK. Record types that want EGU/PREC must define them in their own
+    # recordtype block — see aiRecord.dbd, motorRecord.dbd for precedent.
+    # -----------------------------------------------------------------------
+    field(EGU, DBF_STRING) {
+        prompt("Engineering Units")
+        promptgroup("80 - Display")
+        interest(1)
+        size(16)
+    }
+    field(PREC, DBF_SHORT) {
+        prompt("Display Precision")
+        promptgroup("80 - Display")
+        interest(1)
+    }
+    field(HOPR, DBF_DOUBLE) {
+        prompt("High Operating Range")
+        promptgroup("80 - Display")
+        interest(1)
+    }
+    field(LOPR, DBF_DOUBLE) {
+        prompt("Low Operating Range")
+        promptgroup("80 - Display")
+        interest(1)
+    }
+    field(DRVH, DBF_DOUBLE) {
+        prompt("Drive High Limit")
+        promptgroup("30 - Action")
+        interest(1)
+    }
+    field(DRVL, DBF_DOUBLE) {
+        prompt("Drive Low Limit")
+        promptgroup("30 - Action")
+        interest(1)
+    }
+
+    # -----------------------------------------------------------------------
+    # Input fields — direct status from PLC (INP_* links, CP)
+    # -----------------------------------------------------------------------
+
+    field(INP_RBV, DBF_INLINK) {
+        prompt("Readback Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(RBV, DBF_DOUBLE) {
+        prompt("Readback Value")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    field(INP_EGU, DBF_INLINK) {
+        prompt("EGU Input Link (NC:Eu:Val)")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+
+    field(INP_DMOV, DBF_INLINK) {
+        prompt("Done Moving Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(DMOV, DBF_SHORT) {
+        prompt("Done Moving")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    field(INP_MOVN, DBF_INLINK) {
+        prompt("Moving Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(MOVN, DBF_SHORT) {
+        prompt("Motor Is Moving")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    # Limit switches. The PLC publishes bForwardEnabled/bBackwardEnabled
+    # (active-low: 1=motion allowed, 0=at limit). The record inverts these
+    # at read time so HLS/LLS follow motor record convention (active-high:
+    # 1=limit hit). All downstream logic (MSTA, alarms) uses the
+    # active-high form.
+    field(INP_HLS, DBF_INLINK) {
+        prompt("High Limit Switch Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(HLS, DBF_SHORT) {
+        prompt("At High Limit Switch")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    field(INP_LLS, DBF_INLINK) {
+        prompt("Low Limit Switch Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(LLS, DBF_SHORT) {
+        prompt("At Low Limit Switch")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    field(INP_ATHM, DBF_INLINK) {
+        prompt("At Home Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(ATHM, DBF_SHORT) {
+        prompt("At HOME")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    # Direction of travel — computed from INP_NDIR and INP_PDIR
+    # 0 = negative, 1 = positive, unchanged when stopped
+    field(INP_NDIR, DBF_INLINK) {
+        prompt("Negative Direction Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(INP_PDIR, DBF_INLINK) {
+        prompt("Positive Direction Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(NDIR, DBF_SHORT) {
+        prompt("Moving In Negative Direction")
+        special(SPC_NOMOD)
+        interest(2)
+    }
+    field(PDIR, DBF_SHORT) {
+        prompt("Moving In Positive Direction")
+        special(SPC_NOMOD)
+        interest(2)
+    }
+    field(TDIR, DBF_SHORT) {
+        prompt("Direction of Travel (0=Neg 1=Pos)")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    # Error status — used for MSTA computation
+    field(INP_ERR, DBF_INLINK) {
+        prompt("Error Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(LERR, DBF_SHORT) {
+        prompt("Error Status")
+        special(SPC_NOMOD)
+        interest(2)
+    }
+
+    # Homed status — latched flag indicating the axis has been homed since
+    # power-on. Distinct from ATHM (instantaneous home-switch state).
+    # Wired from the PLC's bHomed flag.
+    field(INP_HOMED, DBF_INLINK) {
+        prompt("Homed Status Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(HOMED, DBF_SHORT) {
+        prompt("Axis Homed (latched)")
+        special(SPC_NOMOD)
+        interest(2)
+    }
+
+    # Configured home position (EGU) — mirrored from NC axis parameter
+    # fHomePosition_RBV. Read-only at the EPICS layer; operators set it
+    # via the PLC NC config, not here. Used together with HOMED and RBV
+    # to compute MSTA bit 7 (HOME = "axis is at home position"):
+    #   HOME = HOMED && |RBV - HPOS| < tolerance
+    # where tolerance is derived from PREC (half the least-significant
+    # digit) so the check auto-scales with display precision.
+    field(INP_HPOS, DBF_INLINK) {
+        prompt("Home Position Input Link (fHomePosition_RBV)")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(HPOS, DBF_DOUBLE) {
+        prompt("Home Position (EGU)")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    # Homing in progress — used for MSTA computation
+    field(INP_HMNG, DBF_INLINK) {
+        prompt("Homing Input Link")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(HMNG, DBF_SHORT) {
+        prompt("Homing In Progress")
+        special(SPC_NOMOD)
+        interest(2)
+    }
+
+    # -----------------------------------------------------------------------
+    # Alarm severity menus — selectable per record instance, matching the
+    # motor record convention. Defaults are MAJOR; templates may override.
+    # Severities raised via recGblSetSevr in process(), with priority
+    # determined by recGblSetSevr's own "highest wins" semantics.
+    # -----------------------------------------------------------------------
+    field(HLSV, DBF_MENU) {
+        prompt("High Limit Switch Severity")
+        promptgroup("70 - Alarm")
+        interest(1)
+        initial("MAJOR")
+        menu(menuAlarmSevr)
+    }
+    field(LLSV, DBF_MENU) {
+        prompt("Low Limit Switch Severity")
+        promptgroup("70 - Alarm")
+        interest(1)
+        initial("MAJOR")
+        menu(menuAlarmSevr)
+    }
+    field(LSV, DBF_MENU) {
+        prompt("Limit Violation Severity")
+        promptgroup("70 - Alarm")
+        interest(1)
+        initial("MAJOR")
+        menu(menuAlarmSevr)
+    }
+
+    # Motor Status Word — computed from all status bools each cycle.
+    # Canonical motor record MSTA layout (see motor.h in epics-modules/motor).
+    # Bits that have no tcmotor source (POSITION, SLIP_STALL, GAIN_SUPPORT)
+    # retain their canonical positions and stay zero, so future Typhos
+    # label tables line up regardless of which bits a given record sets.
+    # HLS/LLS are stored in motor record convention (active-high, 1=limit
+    # hit); they are inverted from the PLC's active-low enables at read
+    # time. MSTA bits are also active-high, so compute_msta() uses them
+    # directly without further inversion.
+    #
+    #   bit  0  (0x0001) DIRECTION       TDIR     (1=positive)
+    #   bit  1  (0x0002) DONE            DMOV
+    #   bit  2  (0x0004) PLUS_LS         HLS      (active-high)
+    #   bit  3  (0x0008) HOMLS           ATHM     (home switch state)
+    #   bit  4  (0x0010) -               unused
+    #   bit  5  (0x0020) POSITION        unused   (closed-loop, no PLC source)
+    #   bit  6  (0x0040) SLIP_STALL      unused   (PLC handles via LERR)
+    #   bit  7  (0x0080) HOME            HOMED + RBV near HPOS  (at home position)
+    #   bit  8  (0x0100) PRESENT         always 1
+    #   bit  9  (0x0200) PROBLEM         LERR
+    #   bit 10  (0x0400) MOVING          MOVN
+    #   bit 11  (0x0800) GAIN_SUPPORT    unused
+    #   bit 12  (0x1000) COMM_ERR        link alarm (one cycle lag)
+    #   bit 13  (0x2000) MINUS_LS        LLS      (active-high)
+    #   bit 14  (0x4000) HOMED           HOMED    (latched, from PLC bHomed)
+    #   bit 15  (0x8000) HOMING          HMNG     (tcmotor extension)
+    field(MSTA, DBF_ULONG) {
+        prompt("Motor Status Word")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    # -----------------------------------------------------------------------
+    # Output fields
+    # OUT_* — forward operator writes to PLC command PVs (PP)
+    # RBK_* — read back PLC-confirmed value from _RBV PVs (CP)
+    # -----------------------------------------------------------------------
+
+    # Soft limits — map to NC axis position limits (NC:MaxPos:Goal /
+    # NC:MinPos:Goal). Readback from NC:MaxPos:Val_RBV / NC:MinPos:Val_RBV.
+    # LVIO is computed in process: 1 if RBV > HLM or RBV < LLM.
+    field(HLM, DBF_DOUBLE) {
+        prompt("High Soft Limit")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(OUT_HLM, DBF_OUTLINK) {
+        prompt("High Soft Limit Output Link (NC:MaxPos:Goal)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+
+    field(LLM, DBF_DOUBLE) {
+        prompt("Low Soft Limit")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(OUT_LLM, DBF_OUTLINK) {
+        prompt("Low Soft Limit Output Link (NC:MinPos:Goal)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+
+    # Limit violation flag — computed from RBV vs HLM/LLM each cycle.
+    # 1 if RBV > HLM or RBV < LLM, 0 otherwise.
+    field(LVIO, DBF_SHORT) {
+        prompt("Limit Violation")
+        special(SPC_NOMOD)
+        interest(1)
+    }
+
+    field(VAL, DBF_DOUBLE) {
+        prompt("Desired Position")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+
+    # User Offset (EGU) — bidirectionally mirrored with the NC axis offset.
+    # The PLC owns the value; OFF is the EPICS-side reflection of it.
+    # - INP_OFF: CP from NC:PosBias_RBV, updates OFF every cycle so changes
+    #   made via TwinCAT (or any other ADS client) are visible at the EPICS
+    #   layer within one scan.
+    # - OUT_OFF: PP to NC:PosBias, pushed by special() when OFF is CA-written.
+    # - RBK_OFF: plain DB_LINK, read once by init_callback to seed OFF before
+    #   the first CP update arrives.
+    # The LOFF last-sent cache is updated both on CA writes (in special()) and
+    # on CP reads (in process() after read_input) to prevent write-loops:
+    # changes that arrived from the PLC must not be echoed back.
+    field(OFF, DBF_DOUBLE) {
+        prompt("User Offset (EGU)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(INP_OFF, DBF_INLINK) {
+        prompt("User Offset Input Link (NC:PosBias_RBV)")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(OUT_OFF, DBF_OUTLINK) {
+        prompt("User Offset Output Link (NC:PosBias)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+
+    # -----------------------------------------------------------------------
+    # Continuous-read input links for bidirectional fields.
+    # Used for fields where the PLC may legitimately be a source of writes
+    # (commissioning-class settings like soft limits and user offset).
+    # The L* cache prevents write-loops; see SYNC_FROM_PLC_* in
+    # tcmotorRecord.c for the mechanism. Motion-parameter fields (VELO,
+    # ACCS, VBAS, VMAX, BDST, CNEN) are deliberately NOT mirrored this way
+    # — they are EPICS-owned per motor record convention, seeded once from
+    # the PLC at init via RBK_*, and written from CA thereafter.
+    # PV names below are placeholders; resolve to actual NC PVs in the
+    # template.
+    # -----------------------------------------------------------------------
+    field(INP_HLM, DBF_INLINK) {
+        prompt("High Soft Limit Input Link (NC:MaxPos:Val_RBV)")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+    field(INP_LLM, DBF_INLINK) {
+        prompt("Low Soft Limit Input Link (NC:MinPos:Val_RBV)")
+        promptgroup("40 - Input")
+        interest(1)
+    }
+
+    field(RBK_VAL,  DBF_INLINK) { prompt("VAL init readback")  special(SPC_NOMOD) interest(3) }
+    field(RBK_VELO, DBF_INLINK) { prompt("VELO init readback") special(SPC_NOMOD) interest(3) }
+    field(RBK_VBAS, DBF_INLINK) { prompt("VBAS init readback") special(SPC_NOMOD) interest(3) }
+    field(RBK_VMAX, DBF_INLINK) { prompt("VMAX init readback") special(SPC_NOMOD) interest(3) }
+    field(RBK_ACCS, DBF_INLINK) { prompt("ACCS init readback") special(SPC_NOMOD) interest(3) }
+    field(RBK_CNEN, DBF_INLINK) { prompt("CNEN init readback") special(SPC_NOMOD) interest(3) }
+    field(RBK_HLM,  DBF_INLINK) { prompt("HLM init readback")  special(SPC_NOMOD) interest(3) }
+    field(RBK_LLM,  DBF_INLINK) { prompt("LLM init readback")  special(SPC_NOMOD) interest(3) }
+    field(RBK_BDST, DBF_INLINK) { prompt("BDST init readback") special(SPC_NOMOD) interest(3) }
+    field(RBK_OFF,  DBF_INLINK) { prompt("OFF init readback")  special(SPC_NOMOD) interest(3) }
+    field(RBK_TWV,  DBF_INLINK) { prompt("TWV init readback")  special(SPC_NOMOD) interest(3) }
+
+    field(OUT_VAL, DBF_OUTLINK) {
+        prompt("Position Output Link")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+
+    field(STOP, DBF_SHORT) {
+        prompt("Stop")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(OUT_STOP, DBF_OUTLINK) {
+        prompt("Stop Output Link")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    # No RBK_STOP — bHalt is a pure output driven by the SPMG state machine.
+    # Reading it back via CP would create a scan loop.
+
+    # HOMF — homes via low limit switch (eHomeMode=LOW_LIMIT=1)
+    # HOMR — homes via high limit switch (eHomeMode=HIGH_LIMIT=2)
+    # Both share OUT_HOMF (bHomeCmd) — direction set via OUT_HMOD (eHomeMode)
+    field(HOMF, DBF_SHORT) {
+        prompt("Home Forward (via low limit)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        pp(TRUE)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(HOMR, DBF_SHORT) {
+        prompt("Home Reverse (via high limit)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        pp(TRUE)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(OUT_HOMF, DBF_OUTLINK) {
+        prompt("Home Command Output Link (bHomeCmd)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    field(OUT_HMOD, DBF_OUTLINK) {
+        prompt("Home Mode Output Link (eHomeMode)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    # RBK_HOMF intentionally omitted — bHomeCmd is a momentary pulse command.
+    # The PLC clears it immediately. Reading it back would overwrite HOMF=0
+    # on the next process cycle, causing repeated homing commands.
+
+    field(VELO, DBF_DOUBLE) {
+        prompt("Velocity (EGU/s)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(OUT_VELO, DBF_OUTLINK) {
+        prompt("Velocity Output Link")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+
+    field(VBAS, DBF_DOUBLE) {
+        prompt("Base Velocity (EGU/s)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(OUT_VBAS, DBF_OUTLINK) {
+        prompt("Base Velocity Output Link (fVelocityBase)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+
+    field(VMAX, DBF_DOUBLE) {
+        prompt("Max Velocity (EGU/s)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(OUT_VMAX, DBF_OUTLINK) {
+        prompt("Max Velocity Output Link (fVelocityMax)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+
+    field(ACCS, DBF_DOUBLE) {
+        prompt("Acceleration (EGU/s^2)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    # ACCL: motor-record acceleration TIME (seconds) for screen compatibility
+    # (Typhos). Derived from / drives ACCS via ACCS = VELO / ACCL. ACCS is the
+    # authoritative rate sent to the PLC; ACCL has no PLC link. EPICS-owned, no
+    # power-on default of 0 issue since it is seeded from ACCS at init.
+    field(ACCL, DBF_DOUBLE) {
+        prompt("Acceleration Time (s)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(OUT_ACCS, DBF_OUTLINK) {
+        prompt("Acceleration Output Link (fAcceleration)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    field(OUT_DECS, DBF_OUTLINK) {
+        prompt("Deceleration Output Link (fDeceleration)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+
+    # ---------------------------------------------------------------------
+    # Motor-record compatibility placeholders (for Typhos screens).
+    # DECLARATIONS ONLY -- no special() handling, links, or logic yet.
+    # They exist so the standard motor screen fields connect instead of
+    # timing out; behavior to be implemented later.
+    #   DRBV  dial-coordinate readback   (screen: dial_position)
+    #   FOFF  offset freeze switch        (screen: offset_freeze_switch)
+    #   SET   set/use switch              (screen: set_use_switch)
+    #   DIR   user direction              (screen: user_offset_dir)
+    # ---------------------------------------------------------------------
+    field(DRBV, DBF_DOUBLE) {
+        prompt("Dial Readback Value")
+        asl(ASL0)
+        interest(1)
+    }
+    field(FOFF, DBF_SHORT) {
+        prompt("Offset Freeze Switch")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        interest(1)
+    }
+    field(SET, DBF_SHORT) {
+        prompt("Set/Use Switch")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        interest(1)
+    }
+    field(DIR, DBF_SHORT) {
+        prompt("User Direction")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        interest(1)
+    }
+
+    field(CNEN, DBF_SHORT) {
+        prompt("Enable Control")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(OUT_CNEN, DBF_OUTLINK) {
+        prompt("Enable Control Output Link")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+
+    # Backlash distance — maps to NC axis backlash parameter
+    field(BDST, DBF_DOUBLE) {
+        prompt("Backlash Distance (EGU)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(OUT_BDST, DBF_OUTLINK) {
+        prompt("Backlash Output Link (NC:Backlash:Goal)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+
+    # SPMG — Stop/Pause/Move/Go state machine owned by tcmotor.
+    # Replaces FB_MotionSPMG in the PLC.
+    #   0 = Stop  — assert bHalt, no resume
+    #   1 = Pause — assert bHalt, position held
+    #   2 = Move  — clear bHalt, trigger bMoveCmd, auto-revert to Pause on DMOV
+    #   3 = Go    — clear bHalt, normal operation
+    field(SPMG, DBF_MENU) {
+        prompt("Stop/Pause/Move/Go")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+        menu(tcmotorSPMG)
+        initial("3")
+    }
+    field(OUT_MCMD, DBF_OUTLINK) {
+        prompt("Move Command Output Link (bMoveCmd)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+
+    # Tweak output links. The user-facing command is TWF/TWR/TWV (see below).
+    # These links bind to the PLC's MC_JOG symbols (bJogFwdCmd/bJogBwdCmd and
+    # NC:JogIncFwd/Bwd:Goal): from the PLC's perspective a tweak IS a jog
+    # (MC_JOG). The EPICS field names use the TWEAK nomenclature; the PLC symbol
+    # names they connect to are set in the template. The PLC clears the command
+    # bits itself after seeing them.
+    field(OUT_TWF, DBF_OUTLINK) {
+        prompt("Tweak Fwd Cmd Link (bJogFwdCmd)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    field(OUT_TIF, DBF_OUTLINK) {
+        prompt("Tweak Fwd Increment Link (NC:JogIncFwd:Goal)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    field(OUT_TWR, DBF_OUTLINK) {
+        prompt("Tweak Rev Cmd Link (bJogBwdCmd)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    field(OUT_TIR, DBF_OUTLINK) {
+        prompt("Tweak Rev Increment Link (NC:JogIncBwd:Goal)")
+        promptgroup("50 - Output")
+        interest(1)
+    }
+    # RBK_* intentionally omitted — the commands are momentary pulses.
+
+
+    # TWF / TWR — motor record tweak commands. Same PLC operation as JOGF/JOGR
+    # (MC_JOG relative move), reusing the tweak output links (OUT_TIF/OUT_TWF for
+    # forward, OUT_TIR/OUT_TWR for reverse). The tweak increment is TWV (the
+    # dedicated tweak step size), NOT VAL: VAL is a position setpoint that
+    # triggers an absolute move when written, so it cannot serve as the tweak
+    # increment. These fields exist because client code and operators expect the
+    # motor record tweak field names. Momentary: PLC clears the cmd after use.
+    field(TWV, DBF_DOUBLE) {
+        prompt("Tweak Step Size (EGU)")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(TWF, DBF_SHORT) {
+        prompt("Tweak Motor Forward")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        pp(TRUE)
+        special(SPC_MOD)
+        interest(1)
+    }
+    field(TWR, DBF_SHORT) {
+        prompt("Tweak Motor Reverse")
+        promptgroup("30 - Action")
+        asl(ASL0)
+        pp(TRUE)
+        special(SPC_MOD)
+        interest(1)
+    }
+    # TWF uses OUT_TIF/OUT_TWF, TWR uses
+    # OUT_TIR/OUT_TWR. No RBK_* — momentary pulses. TWV is a plain
+    # CA-owned setpoint (no special: writing it never moves the motor).
+
+    # -----------------------------------------------------------------------
+    # Internal tracking fields — SPC_NOMOD, not accessible by CA clients
+    # -----------------------------------------------------------------------
+    field(LVAL, DBF_DOUBLE) {
+        prompt("Last Val Monitored")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LRBV, DBF_DOUBLE) {
+        prompt("Last RBV Monitored")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    # Last-sent cache for output fields — suppress redundant ADS writes
+    field(LOVL, DBF_DOUBLE) {
+        prompt("Last Output Val Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LSTO, DBF_SHORT) {
+        prompt("Last Stop Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(BVALP, DBF_SHORT) {
+        prompt("VAL Pending Move Flag")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(BMCP, DBF_SHORT) {
+        prompt("bMoveCmd Clear Pending Flag")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(PDMOV, DBF_SHORT) {
+        prompt("Previous DMOV for edge detection")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(PMOVN, DBF_SHORT) {
+        prompt("Previous MOVN for edge detection")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(BINIT, DBF_SHORT) {
+        prompt("Initialization Complete Flag")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(BINIT2, DBF_SHORT) {
+        prompt("Output Fields Initialized Flag")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(IDLY, DBF_DOUBLE) {
+        prompt("Init Delay (seconds)")
+        promptgroup("30 - Action")
+        interest(2)
+    }
+    field(INITCB, DBF_NOACCESS) {
+        prompt("Init Callback Structure")
+        special(SPC_NOMOD)
+        interest(4)
+        extra("CALLBACK initcb")
+    }
+    field(CMDCB, DBF_NOACCESS) {
+        prompt("Momentary Cmd Clear Callback")
+        special(SPC_NOMOD)
+        interest(4)
+        extra("CALLBACK cmdcb")
+    }
+    field(MCMDCB, DBF_NOACCESS) {
+        prompt("Move Cmd Clear Callback")
+        special(SPC_NOMOD)
+        interest(4)
+        extra("CALLBACK mcmdcb")
+    }
+    field(LVEL, DBF_DOUBLE) {
+        prompt("Last Velo Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LVBS, DBF_DOUBLE) {
+        prompt("Last Base Velo Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LVMX, DBF_DOUBLE) {
+        prompt("Last Max Velo Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LACS, DBF_DOUBLE) {
+        prompt("Last Accs Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LCNE, DBF_SHORT) {
+        prompt("Last CnEn Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LHLM, DBF_DOUBLE) {
+        prompt("Last High Soft Limit Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LLLM, DBF_DOUBLE) {
+        prompt("Last Low Soft Limit Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LBDS, DBF_DOUBLE) {
+        prompt("Last Backlash Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    field(LOFF, DBF_DOUBLE) {
+        prompt("Last User Offset Sent")
+        special(SPC_NOMOD)
+        interest(3)
+    }
+    # Last-posted values for monitor change detection — one per CA-visible field
+    field(LDMOV, DBF_SHORT) { prompt("Last DMOV Posted") special(SPC_NOMOD) interest(3) }
+    field(LMOVN, DBF_SHORT) { prompt("Last MOVN Posted") special(SPC_NOMOD) interest(3) }
+    field(LHLS,  DBF_SHORT) { prompt("Last HLS Posted")  special(SPC_NOMOD) interest(3) }
+    field(LLLS,  DBF_SHORT) { prompt("Last LLS Posted")  special(SPC_NOMOD) interest(3) }
+    field(LATHM, DBF_SHORT) { prompt("Last ATHM Posted") special(SPC_NOMOD) interest(3) }
+    field(LHOM,  DBF_SHORT) { prompt("Last HOMED Posted") special(SPC_NOMOD) interest(3) }
+    field(LHPOS, DBF_DOUBLE) { prompt("Last HPOS Posted") special(SPC_NOMOD) interest(3) }
+    field(LTDIR, DBF_SHORT) { prompt("Last TDIR Posted") special(SPC_NOMOD) interest(3) }
+    field(LSPMG, DBF_MENU) { prompt("Last SPMG Posted") special(SPC_NOMOD) interest(3) menu(tcmotorSPMG) }
+    field(LLVIO, DBF_SHORT) { prompt("Last LVIO Posted") special(SPC_NOMOD) interest(3) }
+    field(LTWF,  DBF_SHORT) { prompt("Last TWF Posted")  special(SPC_NOMOD) interest(3) }
+    field(LTWR,  DBF_SHORT) { prompt("Last TWR Posted")  special(SPC_NOMOD) interest(3) }
+    field(LTWFI, DBF_DOUBLE) { prompt("Last Tweak Fwd Incr Sent") special(SPC_NOMOD) interest(3) }
+    field(LTWRI, DBF_DOUBLE) { prompt("Last Tweak Rev Incr Sent") special(SPC_NOMOD) interest(3) }
+    field(LMSTA, DBF_ULONG) { prompt("Last MSTA Posted") special(SPC_NOMOD) interest(3) }
+}
+

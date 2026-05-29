@@ -6,6 +6,17 @@ include $(TOP)/configure/CONFIG
 #=============================
 
 #=============================
+# tcmotor record type — TwinCAT motor record with motor record field naming
+# convention (.VAL, .RBV, .DMOV etc.) and no internal motion logic.
+# Built as a standalone library so it can be used by other IOCs in the module.
+# DBDINC triggers auto-generation of tcmotorRecord.h from tcmotorRecord.dbd
+# before the C source is compiled.
+DBDINC += tcmotorRecord
+LIBRARY_IOC += tcmotorRecord
+tcmotorRecord_SRCS += tcmotorRecord.c
+tcmotorRecord_LIBS += $(EPICS_BASE_IOC_LIBS)
+
+#=============================
 # Build an ioc application
 PROD_IOC = adsIoc
 
@@ -22,6 +33,7 @@ adsIoc_DBD += asyn.dbd
 adsIoc_DBD += drvAsynIPPort.dbd
 adsIoc_DBD += dbArchive.dbd
 adsIoc_DBD += system.dbd
+adsIoc_DBD += tcmotorRecord.dbd
 
 ifneq (,$(findstring /,$(CAPUTLOG)))
   adsIoc_DBD += caPutLog.dbd
@@ -64,6 +76,7 @@ adsIoc_SRCS += adsIoc_registerRecordDeviceDriver.cpp
 adsIoc_SRCS += infoFieldArchive.c
 adsIoc_SRCS_DEFAULT += adsIocMain.cpp
 
+adsIoc_LIBS += tcmotorRecord
 adsIoc_LIBS += devIocStats
 adsIoc_LIBS += asyn
 adsIoc_LIBS += autosave
