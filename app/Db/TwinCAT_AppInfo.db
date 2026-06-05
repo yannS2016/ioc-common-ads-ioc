@@ -32,7 +32,7 @@ record(longin,"$(PREFIX):AppInfo:AdsPort"){
  info(archive, "monitor 1: VAL")
 }
 
-record(bi,"$(PREFIX)AppInfo:BootDataLoaded"){
+record(bi,"$(PREFIX):AppInfo:BootDataLoaded"){
  field(PINI, "1")
  field(TSE, -2)
  field(DTYP, "asynInt32")
