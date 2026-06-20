@@ -1,0 +1,62 @@
+name: Build CI Docker image
+
+# Rebuild when the image recipe, its base env, or the pinned module versions change
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'ci/Dockerfile'
+      - 'deps/RELEASE_SITE'
+      - 'configure/RELEASE'   # module-version bumps must rebuild the image
+  workflow_dispatch:  # allow manual trigger
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lowercase repository name
+        run: echo "REPO=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Derive the module versions from ads-ioc's own configure/RELEASE so the
+      # image is built against exactly the environment the IOC is released with.
+      # Emits each "<NAME>_MODULE_VERSION=<value>" line as a build-arg; the
+      # Dockerfile consumes the ones it knows (asyn, motor, ads, ...).
+      - name: Derive module versions from configure/RELEASE
+        id: modver
+        run: |
+          {
+            echo 'args<<ARGS_EOF'
+            grep -E '^[A-Z_]+_MODULE_VERSION[[:space:]]*=' configure/RELEASE \
+              | sed -E 's/[[:space:]]*=[[:space:]]*/=/; s/[[:space:]]+$//'
+            echo 'ARGS_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ci/Dockerfile
+          push: true
+          build-args: ${{ steps.modver.outputs.args }}
+          tags: |
+            ghcr.io/${{ env.REPO }}/ci:latest
+            ghcr.io/${{ env.REPO }}/ci:${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/${{ env.REPO }}/ci:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ env.REPO }}/ci:buildcache,mode=max
