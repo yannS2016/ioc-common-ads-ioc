@@ -1,0 +1,8 @@
+# Keep the image build context lean. Source dirs (app, configure, iocBoot,
+# ci, deps, RELEASE_SITE) are kept; only git metadata and build artifacts go.
+.git
+build.log
+**/O.*
+**/*.o
+**/*.d
+**/bin

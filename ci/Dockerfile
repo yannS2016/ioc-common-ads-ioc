@@ -239,12 +239,12 @@ ENV ADS_IOC_VERSION=R2.0.0
 ENV ADS_IOC_ROOT=${IOC_COMMON_PATH}/ads-ioc
 ENV ADS_IOC_PATH=${ADS_IOC_ROOT}/${ADS_IOC_VERSION}
 
-WORKDIR ${ADS_IOC_ROOT}
-
-RUN git clone --branch ${ADS_IOC_VERSION} \
-        ${GIT_IOC_TOP}/ads-ioc.git ${ADS_IOC_PATH} && \
-    cd ${ADS_IOC_PATH} && git log | head && \
-    make -C ${ADS_IOC_PATH} && \
+# Build this repo's own source (the image is built from it) so the IOC builds
+# against the twincat-ads version installed above. The previous step cloned a
+# fixed upstream ads-ioc tag, which pinned a different ADS version (1.0.0 vs the
+# 1.1.1 this repo installs) and failed the configure/RELEASE check.
+COPY . ${ADS_IOC_PATH}
+RUN make -C ${ADS_IOC_PATH} && \
     make -C ${ADS_IOC_PATH} clean
     
 # gtest — for unit testing
