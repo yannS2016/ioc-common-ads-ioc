@@ -7,7 +7,7 @@ on:
       - master
     paths:
       - 'ci/Dockerfile'
-      - 'deps/RELEASE_SITE'
+      - 'RELEASE_SITE'        # EPICS base version (BASE_MODULE_VERSION)
       - 'configure/RELEASE'   # module-version bumps must rebuild the image
   workflow_dispatch:  # allow manual trigger
 
@@ -34,16 +34,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Derive the module versions from ads-ioc's own configure/RELEASE so the
-      # image is built against exactly the environment the IOC is released with.
-      # Emits each "<NAME>_MODULE_VERSION=<value>" line as a build-arg; the
-      # Dockerfile consumes the ones it knows (asyn, motor, ads, ...).
-      - name: Derive module versions from configure/RELEASE
+      # Derive the build environment from ads-ioc's own files so the image is
+      # built against exactly what the IOC is released with: module versions from
+      # configure/RELEASE and the EPICS base version (BASE_MODULE_VERSION) from
+      # RELEASE_SITE. Emits each "<NAME>_MODULE_VERSION=<value>" line as a
+      # build-arg; the Dockerfile consumes the ones it knows.
+      - name: Derive versions from configure/RELEASE + RELEASE_SITE
         id: modver
         run: |
           {
             echo 'args<<ARGS_EOF'
-            grep -E '^[A-Z_]+_MODULE_VERSION[[:space:]]*=' configure/RELEASE \
+            grep -hE '^[A-Z_]+_MODULE_VERSION[[:space:]]*=' configure/RELEASE RELEASE_SITE \
               | sed -E 's/[[:space:]]*=[[:space:]]*/=/; s/[[:space:]]+$//'
             echo 'ARGS_EOF'
           } >> "$GITHUB_OUTPUT"

@@ -81,10 +81,16 @@ ENV ASYN_MODULE_VERSION=${ASYN_MODULE_VERSION} \
     ADS_MODULE_VERSION=${ADS_MODULE_VERSION} \
     STREAMDEVICE_MODULE_VERSION=${STREAMDEVICE_MODULE_VERSION}
 
-# Versions NOT pinned by ads-ioc's configure/RELEASE (EPICS base, transitive
-# build deps, and the test-only gtest) — this Dockerfile is their source.
+# EPICS base version comes from the IOC's RELEASE_SITE: docker.yml parses
+# BASE_MODULE_VERSION from RELEASE_SITE and passes it as a --build-arg (the
+# default below mirrors RELEASE_SITE). BASE_MODULE_TAG is the matching git
+# branch to clone base from and is not in RELEASE_SITE, so it stays here.
+ARG BASE_MODULE_VERSION=R7.0.3.1-2.0
+ENV BASE_MODULE_VERSION=${BASE_MODULE_VERSION}
+
+# Versions NOT pinned by ads-ioc (transitive build deps + the test-only gtest)
+# — this Dockerfile is their source.
 ENV BASE_MODULE_TAG=R7.0.3.1-2.branch
-ENV BASE_MODULE_VERSION=R7.0.3.1-2.0
 ENV CALC_MODULE_VERSION=R3.7-1.0.1
 ENV SEQ_MODULE_VERSION=R2.2.4-1.2
 ENV SSCAN_MODULE_VERSION=R2.10.2-1.1.0
@@ -96,6 +102,9 @@ ENV GIT_BASE_TOP=${GIT_MODULE_TOP}
 ENV GIT_IOC_TOP=https://github.com/pcdshub
 
 ENV EPICS_SITE_TOP=/cds/group/pcds/epics
+# Provided here as an ENV (the root RELEASE_SITE we copy in below does not set
+# it, unlike the old deps/RELEASE_SITE) so module builds that reference it resolve.
+ENV PSPKG_ROOT=/cds/group/pcds/pkg_mgr
 ENV BASE_MODULE_PATH=/cds/group/pcds/epics/base/${BASE_MODULE_VERSION}
 ENV ASYN_MODULE_PATH=/cds/group/pcds/epics/${BASE_MODULE_VERSION}/modules/asyn/${ASYN_MODULE_VERSION}
 ENV AUTOSAVE_MODULE_PATH=/cds/group/pcds/epics/${BASE_MODULE_VERSION}/modules/autosave/${AUTOSAVE_MODULE_VERSION}
@@ -136,8 +145,9 @@ RUN mkdir -p /reg/g && ln -sf /cds/group/pcds /reg/g/pcds
 
 WORKDIR ${EPICS_SITE_TOP}
 
-# RELEASE_SITE - copy and patch to match our BASE_MODULE_VERSION
-COPY deps/RELEASE_SITE ${EPICS_MODULES}/RELEASE_SITE
+# RELEASE_SITE — use the IOC's own root RELEASE_SITE so the image's module
+# environment mirrors exactly what ads-ioc is built against (single source).
+COPY RELEASE_SITE ${EPICS_MODULES}/RELEASE_SITE
 COPY deps/RELEASE_SITE.check ${EPICS_MODULES}/RELEASE_SITE.check
 
 # EPICS Base
