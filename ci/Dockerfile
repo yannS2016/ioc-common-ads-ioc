@@ -57,7 +57,7 @@ RUN dnf update -y && \
 # Python dependencies 
 RUN pip3 install pyads pre-commit
 
-# ── Module versions ──────────────────────────────────────────────────────────
+# Module versions
 # Modules that ads-ioc pins in its configure/RELEASE are declared as ARG and
 # overridden at build time: .github/workflows/docker.yml parses configure/RELEASE
 # and passes each *_MODULE_VERSION as a --build-arg, so the image always matches
