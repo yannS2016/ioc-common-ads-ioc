@@ -10,14 +10,14 @@
 #   PREC     - Display precision (e.g. 3)
 
 record(tcmotor, "$(PREFIX)$(M)") {
-    field(DESC,  "$(DESC=TwinCAT Motor)")
+    field(DESC,  "$(DESC=$(PREFIX)$(M))")
     field(EGU,   "$(EGU=mm)")
     field(PREC,  "$(PREC=3)")
     field(PINI,  "YES")
     field(HLSV, "MAJOR")
     field(LLSV, "MAJOR")
     field(LSV,  "MAJOR")
-    field(IDLY,  "$(IDLY=5)")
+    field(IDLY,  "$(IDLY=30)")
 
     field(INP_RBV,  "$(PREFIX)$(M):fActPosition_RBV CP MS")
     field(INP_EGU,  "$(PREFIX)$(M):NC:Eu:Val_RBV CP MS")
