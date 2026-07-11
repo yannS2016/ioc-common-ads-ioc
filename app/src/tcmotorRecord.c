@@ -1395,6 +1395,16 @@ static long get_units(DBADDR *paddr, char *units)
 {
     tcmotorRecord *prec = (tcmotorRecord *)paddr->precord;
 
+    /* Channel Access transports units in an 8-byte field (MAX_UNITS_SIZE),
+     * i.e. 7 usable characters plus the NUL -- much smaller than the record's
+     * 16-byte DB_UNITS_SIZE egu buffer. The derived velocity/accel strings add
+     * "/s" (2) and "/s^2" (4) suffixes, so a 6-char base like "Degree" overflows
+     * the CA limit and is silently truncated to "Degree/" on the wire. Abbreviate
+     * the long "Degree" spelling to "deg" so "deg/s" (5) and "deg/s^2" (7) fit. */
+    const char *base = prec->egu;
+    if (strcmp(prec->egu, "Degree") == 0)
+        base = "deg";
+
     if (paddr->pfield == (void *)&prec->val  ||
         paddr->pfield == (void *)&prec->rbv  ||
         paddr->pfield == (void *)&prec->hlm  ||
@@ -1402,13 +1412,13 @@ static long get_units(DBADDR *paddr, char *units)
         paddr->pfield == (void *)&prec->bdst ||
         paddr->pfield == (void *)&prec->off  ||
         paddr->pfield == (void *)&prec->hpos) {
-        strncpy(units, prec->egu, DB_UNITS_SIZE);
+        strncpy(units, base, DB_UNITS_SIZE);
     } else if (paddr->pfield == (void *)&prec->velo ||
                paddr->pfield == (void *)&prec->vbas ||
                paddr->pfield == (void *)&prec->vmax) {
-        snprintf(units, DB_UNITS_SIZE, "%s/s", prec->egu);
+        snprintf(units, DB_UNITS_SIZE, "%s/s", base);
     } else if (paddr->pfield == (void *)&prec->accs) {
-        snprintf(units, DB_UNITS_SIZE, "%s/s^2", prec->egu);
+        snprintf(units, DB_UNITS_SIZE, "%s/s^2", base);
     } else {
         units[0] = '\0';
     }
